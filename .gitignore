@@ -159,3 +159,25 @@ image/é€šç”¨è¡¨æƒ…åŒ…/*
 
 # å¿½ç•¥ FluxGen ç”Ÿæˆçš„å›¾ç‰‡
 image/fluxgen/
+
+# === ¸öÈËAgentÎÄ¼ş±£»¤ ===
+# ±£»¤ËùÓĞAgentÎÄ¼ş£¬µ«±£ÁôÊ¾ÀıºÍÖ¸ÄÏ
+Agent/*
+!Agent/VCP×¨¼ÒAgent½ÇÉ«¿¨Ö¸ÄÏ.txt
+!Agent/ThemeMaidCoco.txt
+!Agent/.gitkeep
+
+# === ¸öÈË»º´æºÍÊı¾İ±£»¤ ===
+# ±£»¤¸÷ÖÖ»º´æÎÄ¼ş
+*_cache.json
+*_cache.txt
+*_cache.md
+*/cache/
+cache/
+
+# ±£»¤ÈÕÖ¾ÎÄ¼ş
+*Log*.txt
+ServerLog*.txt
+
+# ±£»¤ÏòÁ¿Êı¾İ¿âÎÄ¼ş
+VectorStore/
