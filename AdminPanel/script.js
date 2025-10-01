@@ -39,11 +39,16 @@ document.addEventListener('DOMContentLoaded', () => {
     const notesActionStatusSpan = document.getElementById('notes-action-status');
     const searchDailyNotesInput = document.getElementById('search-daily-notes'); // 新增：搜索框
 
-    // Agent Files Editor Elements
-    const agentFileSelect = document.getElementById('agent-file-select');
+    // Agent Manager Elements
+    const agentMapListDiv = document.getElementById('agent-map-list');
+    const addAgentMapEntryButton = document.getElementById('add-agent-map-entry-button');
+    const saveAgentMapButton = document.getElementById('save-agent-map-button');
+    const agentMapStatusSpan = document.getElementById('agent-map-status');
+    const editingAgentFileDisplay = document.getElementById('editing-agent-file-display');
     const agentFileContentEditor = document.getElementById('agent-file-content-editor');
     const saveAgentFileButton = document.getElementById('save-agent-file-button');
     const agentFileStatusSpan = document.getElementById('agent-file-status');
+    const createAgentFileButton = document.getElementById('create-agent-file-button'); // 新增：创建文件按钮
 
     // TVS Files Editor Elements
     const tvsFileSelect = document.getElementById('tvs-file-select');
@@ -61,7 +66,6 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Sidebar Search
     const sidebarSearchInput = document.getElementById('sidebar-search');
-
 
     const API_BASE_URL = '/admin_api'; // Corrected API base path
     const MONITOR_API_BASE_URL = '/admin_api/system-monitor'; // New API base for monitoring, corrected path
@@ -353,11 +357,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 li.classList.add('dynamic-plugin-nav-item'); // Add class for dynamic items
                 const a = document.createElement('a');
                 a.href = '#';
-                let displayName = plugin.manifest.displayName || plugin.manifest.name;
+                const originalName = plugin.manifest.name;
+                const displayName = plugin.manifest.displayName || originalName;
+                let nameHtml = displayName;
                 if (plugin.isDistributed) {
-                    displayName += ` <span class="plugin-type-icon" title="分布式插件 (来自: ${plugin.serverId || '未知'})">☁️</span>`;
+                    nameHtml += ` <span class="plugin-type-icon" title="分布式插件 (来自: ${plugin.serverId || '未知'})">☁️</span>`;
                 }
-                a.innerHTML = displayName; // Use innerHTML to render the span
+                nameHtml += `<br><span class="plugin-original-name">(${originalName})</span>`;
+                a.innerHTML = nameHtml; // Use innerHTML to render the span
                 a.dataset.target = `plugin-${plugin.manifest.name}-config`;
                 a.dataset.pluginName = plugin.manifest.name;
                 li.appendChild(a);
@@ -372,8 +379,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (plugin.isDistributed) descriptionHtml += ` (来自节点: ${plugin.serverId || '未知'})`;
                 if (!plugin.enabled) descriptionHtml += ' <span class="plugin-disabled-badge">(已禁用)</span>';
 
-
-                pluginSection.innerHTML = `<h2>${plugin.manifest.displayName || plugin.manifest.name} 配置 ${!plugin.enabled ? '<span class="plugin-disabled-badge-title">(已禁用)</span>':''} ${plugin.isDistributed ? '<span class="plugin-type-icon" title="分布式插件">☁️</span>' : ''}</h2>
+                let titleHtml = `${displayName} <span class="plugin-original-name">(${originalName})</span> 配置`;
+                if (!plugin.enabled) titleHtml += ' <span class="plugin-disabled-badge-title">(已禁用)</span>';
+                if (plugin.isDistributed) titleHtml += ' <span class="plugin-type-icon" title="分布式插件">☁️</span>';
+                
+                pluginSection.innerHTML = `<h2>${titleHtml}</h2>
                                            <p class="plugin-meta">${descriptionHtml}</p>`;
 
                 // Add a control area for plugin actions like toggle
@@ -712,7 +722,7 @@ Description Length: ${newDescription.length}`);
         
         // Rebuild the .env string from the form, preserving comments and order
         const currentPluginEntries = originalPluginConfigs[pluginName] || [];
-        const newConfigString = buildEnvStringForPlugin(form, currentPluginEntries);
+        const newConfigString = buildEnvStringForPlugin(form, currentPluginEntries, pluginName);
 
         try {
             await apiFetch(`${API_BASE_URL}/plugins/${pluginName}/config`, {
@@ -724,7 +734,7 @@ Description Length: ${newDescription.length}`);
         } catch (error) { /* Error handled by apiFetch */ }
     }
 
-    function buildEnvStringForPlugin(formElement, originalParsedEntries) {
+    function buildEnvStringForPlugin(formElement, originalParsedEntries, pluginName) {
         const finalLines = [];
         const editedKeysInForm = new Set();
 
@@ -958,7 +968,7 @@ Description Length: ${newDescription.length}`);
             } else if (sectionIdToActivate === 'daily-notes-manager-section') {
                 initializeDailyNotesManager();
             } else if (sectionIdToActivate === 'agent-files-editor-section') {
-                initializeAgentFilesEditor();
+                initializeAgentManager();
             } else if (sectionIdToActivate === 'tvs-files-editor-section') {
                 initializeTvsFilesEditor();
             } else if (sectionIdToActivate === 'server-log-viewer-section') {
@@ -968,7 +978,11 @@ Description Length: ${newDescription.length}`);
                if (iframe) {
                    iframe.src = iframe.src; // Force reload
                }
-           }
+           } else if (sectionIdToActivate === 'preprocessor-order-manager-section') {
+                initializePreprocessorOrderManager();
+          } else if (sectionIdToActivate === 'semantic-groups-editor-section') {
+               initializeSemanticGroupsEditor();
+          }
         } else {
             console.warn(`[navigateTo] Target section with ID '${sectionIdToActivate}' not found.`);
         }
@@ -1644,59 +1658,128 @@ Description Length: ${newDescription.length}`);
     }
     // --- End New Function ---
 
-    // --- Agent Files Editor Functions ---
+    // --- Agent Manager Functions ---
     let currentEditingAgentFile = null;
+    let availableAgentFiles = []; // Cache available .txt files
 
-    async function initializeAgentFilesEditor() {
-        console.log('Initializing Agent Files Editor...');
+    async function initializeAgentManager() {
+        console.log('Initializing Agent Manager...');
         agentFileContentEditor.value = '';
         agentFileStatusSpan.textContent = '';
+        agentMapStatusSpan.textContent = '';
+        editingAgentFileDisplay.textContent = '未选择文件';
         saveAgentFileButton.disabled = true;
         currentEditingAgentFile = null;
-        await loadAgentFilesList();
+        agentMapListDiv.innerHTML = '<p>正在加载 Agent 映射...</p>';
+
+        try {
+            // Fetch both map and available files concurrently
+            const [mapData, filesData] = await Promise.all([
+                apiFetch(`${API_BASE_URL}/agents/map`),
+                apiFetch(`${API_BASE_URL}/agents`)
+            ]);
+            
+            availableAgentFiles = filesData.files.sort((a, b) => a.localeCompare(b));
+            renderAgentMap(mapData);
+
+        } catch (error) {
+            agentMapListDiv.innerHTML = `<p class="error-message">加载 Agent 数据失败: ${error.message}</p>`;
+            showMessage(`加载 Agent 数据失败: ${error.message}`, 'error');
+        }
     }
 
-    async function loadAgentFilesList() {
-        try {
-            const data = await apiFetch(`${API_BASE_URL}/agents`);
-            agentFileSelect.innerHTML = '<option value="">请选择一个文件...</option>'; // Reset
-            if (data.files && data.files.length > 0) {
-                data.files.sort((a, b) => a.localeCompare(b)); // Sort alphabetically
-                data.files.forEach(fileName => {
-                    const option = document.createElement('option');
-                    option.value = fileName;
-                    option.textContent = fileName;
-                    agentFileSelect.appendChild(option);
-                });
-            } else {
-                agentFileSelect.innerHTML = '<option value="">没有找到 Agent 文件</option>';
-                agentFileContentEditor.placeholder = '没有 Agent 文件可供编辑。';
-            }
-        } catch (error) {
-            agentFileSelect.innerHTML = '<option value="">加载 Agent 文件列表失败</option>';
-            showMessage('加载 Agent 文件列表失败: ' + error.message, 'error');
-            agentFileContentEditor.placeholder = '加载 Agent 文件列表失败。';
+    function renderAgentMap(agentMap) {
+        agentMapListDiv.innerHTML = ''; // Clear loading message
+        if (Object.keys(agentMap).length === 0) {
+            agentMapListDiv.innerHTML = '<p>没有定义任何 Agent。请点击“添加新 Agent”来创建一个。</p>';
         }
+
+        for (const agentName in agentMap) {
+            const fileName = agentMap[agentName];
+            const entryDiv = createAgentMapEntryElement(agentName, fileName);
+            agentMapListDiv.appendChild(entryDiv);
+        }
+    }
+
+    function createAgentMapEntryElement(agentName, selectedFile) {
+        const entryDiv = document.createElement('div');
+        entryDiv.className = 'agent-map-entry';
+
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.value = agentName;
+        nameInput.className = 'agent-name-input';
+        nameInput.placeholder = 'Agent 定义名';
+
+        const fileSelect = document.createElement('select');
+        fileSelect.className = 'agent-file-select';
+        
+        const placeholderOption = document.createElement('option');
+        placeholderOption.value = '';
+        placeholderOption.textContent = '选择一个 .txt 文件...';
+        fileSelect.appendChild(placeholderOption);
+
+        availableAgentFiles.forEach(f => {
+            const option = document.createElement('option');
+            option.value = f;
+            option.textContent = f;
+            if (f === selectedFile) {
+                option.selected = true;
+            }
+            fileSelect.appendChild(option);
+        });
+
+        const editFileButton = document.createElement('button');
+        editFileButton.textContent = '编辑文件';
+        editFileButton.className = 'edit-agent-file-btn';
+        editFileButton.onclick = () => {
+            const selectedValue = fileSelect.value;
+            if (selectedValue) {
+                loadAgentFileContent(selectedValue);
+            } else {
+                showMessage('请先为此 Agent 选择一个文件。', 'info');
+            }
+        };
+
+        const deleteButton = document.createElement('button');
+        deleteButton.textContent = '删除';
+        deleteButton.className = 'delete-agent-map-btn';
+        deleteButton.onclick = () => {
+            if (confirm(`确定要删除 Agent "${nameInput.value || '(未命名)'}" 吗？`)) {
+                entryDiv.remove();
+            }
+        };
+
+        entryDiv.appendChild(nameInput);
+        entryDiv.appendChild(document.createTextNode(' → '));
+        entryDiv.appendChild(fileSelect);
+        entryDiv.appendChild(editFileButton);
+        entryDiv.appendChild(deleteButton);
+
+        return entryDiv;
     }
 
     async function loadAgentFileContent(fileName) {
         if (!fileName) {
             agentFileContentEditor.value = '';
-            agentFileStatusSpan.textContent = '请选择一个文件。';
+            agentFileStatusSpan.textContent = '';
+            editingAgentFileDisplay.textContent = '未选择文件';
             saveAgentFileButton.disabled = true;
             currentEditingAgentFile = null;
-            agentFileContentEditor.placeholder = '选择一个 Agent 文件以编辑其内容...';
+            agentFileContentEditor.placeholder = '从左侧选择一个 Agent 以编辑其关联的 .txt 文件...';
             return;
         }
         agentFileStatusSpan.textContent = `正在加载 ${fileName}...`;
         try {
             const data = await apiFetch(`${API_BASE_URL}/agents/${fileName}`);
             agentFileContentEditor.value = data.content;
-            agentFileStatusSpan.textContent = `当前编辑: ${fileName}`;
+            agentFileStatusSpan.textContent = ``; // Clear loading message
+            editingAgentFileDisplay.textContent = `正在编辑: ${fileName}`;
             saveAgentFileButton.disabled = false;
             currentEditingAgentFile = fileName;
         } catch (error) {
             agentFileStatusSpan.textContent = `加载文件 ${fileName} 失败。`;
+            editingAgentFileDisplay.textContent = `加载失败: ${fileName}`;
             showMessage(`加载文件 ${fileName} 失败: ${error.message}`, 'error');
             agentFileContentEditor.value = `无法加载文件: ${fileName}\n\n错误: ${error.message}`;
             saveAgentFileButton.disabled = true;
@@ -1728,17 +1811,126 @@ Description Length: ${newDescription.length}`);
         }
     }
 
-    // Event Listeners for Agent Files Editor
-    if (agentFileSelect) {
-        agentFileSelect.addEventListener('change', (event) => {
-            loadAgentFileContent(event.target.value);
+    async function saveAgentMap() {
+        agentMapStatusSpan.textContent = '正在保存...';
+        agentMapStatusSpan.className = 'status-message info';
+        const newMap = {};
+        let isValid = true;
+
+        agentMapListDiv.querySelectorAll('.agent-map-entry').forEach(entry => {
+            const nameInput = entry.querySelector('.agent-name-input');
+            const fileSelect = entry.querySelector('.agent-file-select');
+            const agentName = nameInput.value.trim();
+            const fileName = fileSelect.value;
+
+            if (!agentName) {
+                showMessage('Agent 定义名不能为空。', 'error');
+                nameInput.focus();
+                isValid = false;
+                return;
+            }
+            if (newMap[agentName]) {
+                showMessage(`Agent 定义名 "${agentName}" 重复。`, 'error');
+                nameInput.focus();
+                isValid = false;
+                return;
+            }
+            if (!fileName) {
+                showMessage(`Agent "${agentName}" 未选择 .txt 文件。`, 'error');
+                fileSelect.focus();
+                isValid = false;
+                return;
+            }
+            newMap[agentName] = fileName;
         });
+
+        if (!isValid) {
+            agentMapStatusSpan.textContent = '保存失败，请检查错误。';
+            agentMapStatusSpan.className = 'status-message error';
+            return;
+        }
+
+        try {
+            await apiFetch(`${API_BASE_URL}/agents/map`, {
+                method: 'POST',
+                body: JSON.stringify(newMap)
+            });
+            showMessage('Agent 映射表已成功保存!', 'success');
+            agentMapStatusSpan.textContent = '保存成功!';
+            agentMapStatusSpan.className = 'status-message success';
+            // Reload to ensure consistency
+            initializeAgentManager();
+        } catch (error) {
+            agentMapStatusSpan.textContent = `保存失败: ${error.message}`;
+            agentMapStatusSpan.className = 'status-message error';
+        }
     }
+
+    function addNewAgentMapEntry() {
+        const entryDiv = createAgentMapEntryElement('', '');
+        agentMapListDiv.appendChild(entryDiv);
+        entryDiv.querySelector('.agent-name-input').focus();
+    }
+
+    async function createNewAgentFileHandler() {
+        let fileName = prompt("请输入要创建的新 .txt 文件名（无需包含 .txt 后缀）:", "");
+        if (!fileName || !fileName.trim()) {
+            showMessage('文件名不能为空。', 'info');
+            return;
+        }
+
+        // 标准化文件名：如果用户添加了.txt，则删除它，然后再添加回来以确保格式正确。
+        fileName = fileName.trim().replace(/\.txt$/i, '');
+        const finalFileName = `${fileName}.txt`;
+
+        if (availableAgentFiles.includes(finalFileName)) {
+            showMessage(`文件 "${finalFileName}" 已存在。`, 'error');
+            return;
+        }
+
+        if (!confirm(`确定要创建新的 Agent 文件 "${finalFileName}" 吗？`)) {
+            return;
+        }
+
+        agentMapStatusSpan.textContent = `正在创建文件 ${finalFileName}...`;
+        agentMapStatusSpan.className = 'status-message info';
+
+        try {
+            // 注意：这假设服务器上已创建新的 API 端点 POST /admin_api/agents/new-file
+            await apiFetch(`${API_BASE_URL}/agents/new-file`, {
+                method: 'POST',
+                body: JSON.stringify({ fileName: finalFileName })
+            });
+            showMessage(`文件 "${finalFileName}" 已成功创建!`, 'success');
+            agentMapStatusSpan.textContent = '文件创建成功!';
+            agentMapStatusSpan.className = 'status-message success';
+            
+            // 刷新整个 agent 管理器以在列表中获取新文件
+            await initializeAgentManager();
+
+        } catch (error) {
+            agentMapStatusSpan.textContent = `创建文件失败: ${error.message}`;
+            agentMapStatusSpan.className = 'status-message error';
+            // showMessage 由 apiFetch 处理
+        }
+    }
+
+
+    // Event Listeners for Agent Manager
     if (saveAgentFileButton) {
         saveAgentFileButton.addEventListener('click', saveAgentFileContent);
     }
+    if (saveAgentMapButton) {
+        saveAgentMapButton.addEventListener('click', saveAgentMap);
+    }
+    if (addAgentMapEntryButton) {
+        addAgentMapEntryButton.addEventListener('click', addNewAgentMapEntry);
+    }
+    if (createAgentFileButton) {
+        createAgentFileButton.addEventListener('click', createNewAgentFileHandler);
+    }
 
-    // --- End Agent Files Editor Functions ---
+    // --- End Agent Manager Functions ---
 
     // --- TVS Files Editor Functions ---
     let currentEditingTvsFile = null;
@@ -1935,4 +2127,356 @@ Description Length: ${newDescription.length}`);
     }
     // --- End Server Log Viewer Functions ---
 
-});
+    // --- Preprocessor Order Manager Functions ---
+    async function initializePreprocessorOrderManager() {
+        const preprocessorListUl = document.getElementById('preprocessor-list');
+        const preprocessorOrderStatusSpan = document.getElementById('preprocessor-order-status');
+
+        if (!preprocessorListUl || !preprocessorOrderStatusSpan) {
+            console.error('Preprocessor manager elements not found in the DOM.');
+            return;
+        }
+        
+        console.log('Initializing Preprocessor Order Manager...');
+        preprocessorListUl.innerHTML = '<li>Loading...</li>';
+        preprocessorOrderStatusSpan.textContent = '';
+        try {
+            const data = await apiFetch(`${API_BASE_URL}/preprocessors/order`);
+            renderPreprocessorList(data.order, preprocessorListUl);
+        } catch (error) {
+            preprocessorListUl.innerHTML = `<li class="error-message">Failed to load preprocessor order: ${error.message}</li>`;
+            showMessage(`Failed to load preprocessor order: ${error.message}`, 'error');
+        }
+    }
+
+    function renderPreprocessorList(order, preprocessorListUl) {
+        preprocessorListUl.innerHTML = '';
+        if (order && order.length > 0) {
+            order.forEach(plugin => {
+                const li = document.createElement('li');
+                li.draggable = true;
+                li.dataset.pluginName = plugin.name;
+
+                const infoDiv = document.createElement('div');
+                infoDiv.className = 'plugin-info';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'plugin-name';
+                nameSpan.textContent = plugin.displayName;
+                infoDiv.appendChild(nameSpan);
+                
+                const descSpan = document.createElement('span');
+                descSpan.className = 'plugin-description';
+                descSpan.textContent = plugin.description;
+                infoDiv.appendChild(descSpan);
+
+                li.appendChild(infoDiv);
+
+                // Drag and Drop Event Listeners
+                li.addEventListener('dragstart', () => {
+                    setTimeout(() => li.classList.add('dragging'), 0);
+                });
+                li.addEventListener('dragend', () => {
+                    li.classList.remove('dragging');
+                });
+
+                preprocessorListUl.appendChild(li);
+            });
+        } else {
+            preprocessorListUl.innerHTML = '<li>No message preprocessor plugins found.</li>';
+        }
+    }
+    
+    // Moved event listeners to be attached once and checked for existence of elements
+    const preprocessorListContainer = document.getElementById('preprocessor-list');
+    if (preprocessorListContainer) {
+        preprocessorListContainer.addEventListener('dragover', e => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(preprocessorListContainer, e.clientY);
+            const dragging = document.querySelector('.dragging');
+            if (dragging) {
+                if (afterElement == null) {
+                    preprocessorListContainer.appendChild(dragging);
+                } else {
+                    preprocessorListContainer.insertBefore(dragging, afterElement);
+                }
+            }
+        });
+    }
+
+    function getDragAfterElement(container, y) {
+        const draggableElements = [...container.querySelectorAll('li:not(.dragging)')];
+        return draggableElements.reduce((closest, child) => {
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) {
+                return { offset: offset, element: child };
+            } else {
+                return closest;
+            }
+        }, { offset: Number.NEGATIVE_INFINITY }).element;
+    }
+    
+    const savePreprocessorOrderButton = document.getElementById('save-preprocessor-order-button');
+    if (savePreprocessorOrderButton) {
+        savePreprocessorOrderButton.addEventListener('click', async () => {
+            const preprocessorListUl = document.getElementById('preprocessor-list');
+            const preprocessorOrderStatusSpan = document.getElementById('preprocessor-order-status');
+            if (!preprocessorListUl || !preprocessorOrderStatusSpan) return;
+
+            const newOrder = [...preprocessorListUl.querySelectorAll('li')].map(li => li.dataset.pluginName);
+            preprocessorOrderStatusSpan.textContent = 'Saving...';
+            preprocessorOrderStatusSpan.className = 'status-message info';
+
+            try {
+                const response = await apiFetch(`${API_BASE_URL}/preprocessors/order`, {
+                    method: 'POST',
+                    body: JSON.stringify({ order: newOrder })
+                });
+                showMessage(response.message, 'success');
+                
+                // Reload the latest order from server to ensure UI reflects the saved state
+                const latestData = await apiFetch(`${API_BASE_URL}/preprocessors/order`);
+                preprocessorOrderStatusSpan.textContent = 'Order saved and reloaded!';
+                preprocessorOrderStatusSpan.className = 'status-message success';
+                renderPreprocessorList(latestData.order, preprocessorListUl);
+            } catch (error) {
+                preprocessorOrderStatusSpan.textContent = `Error: ${error.message}`;
+                preprocessorOrderStatusSpan.className = 'status-message error';
+                // showMessage is handled by apiFetch
+            }
+        });
+    }
+
+
+    // --- Semantic Groups Editor Functions ---
+    let semanticGroupsData = {}; // To hold the current state of groups data
+
+    async function initializeSemanticGroupsEditor() {
+        console.log('Initializing Semantic Groups Editor...');
+        const container = document.getElementById('semantic-groups-container');
+        const statusSpan = document.getElementById('semantic-groups-status');
+        if (!container || !statusSpan) return;
+
+        container.innerHTML = '<p>正在加载语义组...</p>';
+        statusSpan.textContent = '';
+        try {
+            semanticGroupsData = await apiFetch(`${API_BASE_URL}/semantic-groups`);
+            renderSemanticGroups(semanticGroupsData, container);
+        } catch (error) {
+            container.innerHTML = `<p class="error-message">加载语义组失败: ${error.message}</p>`;
+        }
+    }
+
+    function renderSemanticGroups(data, container) {
+        container.innerHTML = '';
+        const groups = data.groups || {};
+        if (Object.keys(groups).length === 0) {
+            container.innerHTML = '<p>没有找到任何语义组。请点击“添加新组”来创建一个。</p>';
+            return;
+        }
+
+        for (const groupName in groups) {
+            const groupData = groups[groupName];
+            const groupElement = createGroupElement(groupName, groupData);
+            container.appendChild(groupElement);
+        }
+    }
+
+    function createGroupElement(groupName, groupData) {
+        const details = document.createElement('details');
+        details.className = 'group-details';
+        details.open = true;
+        details.dataset.groupName = groupName;
+
+        const summary = document.createElement('summary');
+        summary.className = 'group-summary';
+        
+        const groupNameSpan = document.createElement('span');
+        groupNameSpan.className = 'group-name-display';
+        groupNameSpan.textContent = groupName;
+        summary.appendChild(groupNameSpan);
+
+        const deleteGroupBtn = document.createElement('button');
+        deleteGroupBtn.textContent = '删除该组';
+        deleteGroupBtn.className = 'delete-group-btn';
+        deleteGroupBtn.onclick = (e) => {
+            e.preventDefault();
+            if (confirm(`确定要删除语义组 "${groupName}" 吗？`)) {
+                details.remove();
+                // The actual deletion from data happens on save
+            }
+        };
+        summary.appendChild(deleteGroupBtn);
+        details.appendChild(summary);
+
+        const content = document.createElement('div');
+        content.className = 'group-content';
+
+        // Weight editor
+        const weightGroup = document.createElement('div');
+        weightGroup.className = 'form-group';
+        const weightLabel = document.createElement('label');
+        weightLabel.textContent = '权重 (Weight):';
+        const weightInput = document.createElement('input');
+        weightInput.type = 'number';
+        weightInput.step = '0.1';
+        weightInput.className = 'group-weight-input';
+        weightInput.value = groupData.weight || 1.0;
+        weightGroup.appendChild(weightLabel);
+        weightGroup.appendChild(weightInput);
+        content.appendChild(weightGroup);
+
+        // Words editor
+        const wordsGroup = document.createElement('div');
+        wordsGroup.className = 'form-group';
+        const wordsLabel = document.createElement('label');
+        wordsLabel.textContent = '关键词 (Words):';
+        const wordsContainer = document.createElement('div');
+        wordsContainer.className = 'words-container';
+        
+        const allWords = [...(groupData.words || []), ...(groupData.auto_learned || [])];
+        allWords.forEach(word => {
+            const wordTag = createWordTag(word, (groupData.auto_learned || []).includes(word));
+            wordsContainer.appendChild(wordTag);
+        });
+
+        const addWordInput = document.createElement('input');
+        addWordInput.type = 'text';
+        addWordInput.placeholder = '添加新关键词...';
+        addWordInput.className = 'add-word-input';
+        addWordInput.onkeydown = (e) => {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                const newWord = addWordInput.value.trim();
+                if (newWord && !allWords.includes(newWord)) {
+                    const newWordTag = createWordTag(newWord, false);
+                    wordsContainer.insertBefore(newWordTag, addWordInput);
+                    addWordInput.value = '';
+                    allWords.push(newWord); // Update local list to prevent duplicates in same session
+                }
+            }
+        };
+        wordsContainer.appendChild(addWordInput);
+        wordsGroup.appendChild(wordsLabel);
+        wordsGroup.appendChild(wordsContainer);
+        content.appendChild(wordsGroup);
+
+        details.appendChild(content);
+        return details;
+    }
+
+    function createWordTag(word, isAutoLearned) {
+        const tag = document.createElement('span');
+        tag.className = 'word-tag';
+        tag.textContent = word;
+        tag.dataset.word = word;
+        if (isAutoLearned) {
+            tag.classList.add('auto-learned');
+            tag.title = '此词由 AI 自动学习';
+        }
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '×';
+        removeBtn.className = 'remove-word-btn';
+        removeBtn.onclick = () => tag.remove();
+        tag.appendChild(removeBtn);
+        return tag;
+    }
+
+    async function saveSemanticGroups() {
+        const container = document.getElementById('semantic-groups-container');
+        const statusSpan = document.getElementById('semantic-groups-status');
+        if (!container || !statusSpan) return;
+
+        const newGroups = {};
+        const groupElements = container.querySelectorAll('.group-details');
+
+        groupElements.forEach(el => {
+            const groupName = el.dataset.groupName;
+            const weight = parseFloat(el.querySelector('.group-weight-input').value) || 1.0;
+            const words = [];
+            const auto_learned = [];
+
+            el.querySelectorAll('.word-tag').forEach(tag => {
+                if (tag.classList.contains('auto-learned')) {
+                    auto_learned.push(tag.dataset.word);
+                } else {
+                    words.push(tag.dataset.word);
+                }
+            });
+            
+            // Find original data to preserve stats
+            const originalGroup = semanticGroupsData.groups[groupName] || {};
+
+            newGroups[groupName] = {
+                words,
+                auto_learned,
+                weight,
+                vector: null, // Vector will be recalculated on the server
+                last_activated: originalGroup.last_activated || null,
+                activation_count: originalGroup.activation_count || 0,
+                vector_id: originalGroup.vector_id || null // 关键修复：保留 vector_id
+            };
+        });
+
+        const dataToSave = {
+            config: semanticGroupsData.config || {},
+            groups: newGroups
+        };
+
+        statusSpan.textContent = '正在保存...';
+        statusSpan.className = 'status-message info';
+        try {
+            const response = await apiFetch(`${API_BASE_URL}/semantic-groups`, {
+                method: 'POST',
+                body: JSON.stringify(dataToSave)
+            });
+            showMessage(response.message || '语义组已成功保存!', 'success');
+            statusSpan.textContent = '保存成功!';
+            statusSpan.className = 'status-message success';
+            // Reload to get fresh data from server (e.g., recalculated vectors info)
+            initializeSemanticGroupsEditor();
+        } catch (error) {
+            statusSpan.textContent = `保存失败: ${error.message}`;
+            statusSpan.className = 'status-message error';
+        }
+    }
+
+    function addNewSemanticGroup() {
+        const groupName = prompt('请输入新语义组的名称:');
+        if (!groupName || !groupName.trim()) return;
+
+        const normalizedGroupName = groupName.trim();
+        const container = document.getElementById('semantic-groups-container');
+        if (!container) return;
+
+        if (container.querySelector(`[data-group-name="${normalizedGroupName}"]`)) {
+            showMessage(`语义组 "${normalizedGroupName}" 已存在!`, 'error');
+            return;
+        }
+        
+        // If it's the first group, clear the placeholder text
+        if (!container.querySelector('.group-details')) {
+            container.innerHTML = '';
+        }
+
+        const newGroupData = { words: [], auto_learned: [], weight: 1.0 };
+        const newGroupElement = createGroupElement(normalizedGroupName, newGroupData);
+        container.appendChild(newGroupElement);
+        newGroupElement.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Event Listeners for Semantic Groups Editor
+    const saveSemanticGroupsButton = document.getElementById('save-semantic-groups-button');
+    const addSemanticGroupButton = document.getElementById('add-semantic-group-button');
+
+    if (saveSemanticGroupsButton) {
+        saveSemanticGroupsButton.addEventListener('click', saveSemanticGroups);
+    }
+    if (addSemanticGroupButton) {
+        addSemanticGroupButton.addEventListener('click', addNewSemanticGroup);
+    }
+    // --- End Semantic Groups Editor Functions ---
+    });
+
