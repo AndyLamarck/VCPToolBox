@@ -71,13 +71,11 @@ expression:「始」您要计算的完整数学表达式「末」
 - 误差传递: error_propagation('expr_str', {'var1':(value, error), 'var2':(value, error), ...})
 - 置信区间: confidence_interval([data_list], confidence_level)
 
-2.联网搜索工具
-tool_name:「始」TavilySearch「末」,
-query:「始」(必需) 搜索的关键词或问题。「末」,
-topic:「始」(可选, 默认为 'general') 搜索的主题，例如 'news', 'finance', 'research', 'code'。如果AI不确定，可以省略此参数或使用 'general'。「末」,
-search_depth:「始」(可选, 默认为 'basic') 搜索深度，可选值：'basic', 'advanced'。「末」,
-max_results:「始」(可选, 默认为 10) 返回的最大结果数量，范围 5-100。「末」
 
+2. 联网搜索工具 (TavilySearch)
+
+调用此工具使用 Tavily API 进行高级网络搜索。默认启用高级搜索模式并返回图片链接。重要提示：请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。请在您的回复中，使用以下精确格式来请求搜索，确保所有参数值都用「始」和「末」准确包裹：\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」TavilySearch「末」,\nquery:「始」(必需) 搜索的关键词或问题。「末」,\ntopic:「始」(可选, 默认为 'general') 搜索的主题，例如 'news', 'finance'。如果AI不确定，可以省略此参数或使用 'general'。「末」,\nmax_results:「始」(可选, 默认为 10) 返回的最大结果数量，范围 5-100。「末」,\ninclude_raw_content:「始」(可选) 如果需要获取网页原始内容，请将此值设为 'text' 或 'markdown'。「末」,\nstart_date:「始」(可选) 搜索开始日期，格式为 YYYY-MM-DD。「末」,\nend_date:「始」(可选) 搜索结束日期，格式为 YYYY-MM-DD。「末」\n<<<[END_TOOL_REQUEST]>>>\n\n重要提示给AI：\n当此工具执行完毕后，您将收到包含搜索结果的JSON对象。请基于这些结果回答用户的问题或完成相关任务。\n请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。
+       
 3.网页超级爬虫，强大的网页内容爬取器。
 tool_name:「始」UrlFetch「末」,
 url:「始」(必需) 要访问的网页 URL。「末」,

@@ -159,3 +159,30 @@ image/通用表情包/*
 
 # 忽略 FluxGen 生成的图片
 image/fluxgen/
+# AI IDE byterover rules
+.clinerules/byterover-rules.md
+.kilocode/rules/byterover-rules.md
+.roo/rules/byterover-rules.md
+.windsurf/rules/byterover-rules.md
+.cursor/rules/byterover-rules.mdc
+.kiro/steering/byterover-rules.md
+.qoder/rules/byterover-rules.md
+.augment/rules/byterover-rules.md
+
+# Plugin cache files
+Plugin/IMAPIndex/mail_store/
+Plugin/IMAPIndex/storkapp_dailynote/*.tmp.txt
+Plugin/IMAPIndex/storkapp_dailynote/stork_paper_ids.txt
+Plugin/ImageProcessor/multimodal_cache.json
+Plugin/MCPOMonitor/mcpo_status_cache.json
+Plugin/MCPOMonitor/mcpo_status_cache.txt
+Plugin/RAGDiaryPlugin/vector_cache.json
+Plugin/TavilySearch/.vcptoolbox_tavily_cache.json
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Blocked plugin manifests
+*.block
