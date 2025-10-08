@@ -75,17 +75,49 @@ expression:「始」您要计算的完整数学表达式「末」
 2. 联网搜索工具 (TavilySearch)
 
 调用此工具使用 Tavily API 进行高级网络搜索。默认启用高级搜索模式并返回图片链接。重要提示：请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。请在您的回复中，使用以下精确格式来请求搜索，确保所有参数值都用「始」和「末」准确包裹：\n<<<[TOOL_REQUEST]>>>\ntool_name:「始」TavilySearch「末」,\nquery:「始」(必需) 搜索的关键词或问题。「末」,\ntopic:「始」(可选, 默认为 'general') 搜索的主题，例如 'news', 'finance'。如果AI不确定，可以省略此参数或使用 'general'。「末」,\nmax_results:「始」(可选, 默认为 10) 返回的最大结果数量，范围 5-100。「末」,\ninclude_raw_content:「始」(可选) 如果需要获取网页原始内容，请将此值设为 'text' 或 'markdown'。「末」,\nstart_date:「始」(可选) 搜索开始日期，格式为 YYYY-MM-DD。「末」,\nend_date:「始」(可选) 搜索结束日期，格式为 YYYY-MM-DD。「末」\n<<<[END_TOOL_REQUEST]>>>\n\n重要提示给AI：\n当此工具执行完毕后，您将收到包含搜索结果的JSON对象。请基于这些结果回答用户的问题或完成相关任务。\n请优先使用中文词作为检索词，并带上即时信息（如当前年份、月份等）进行检索，以获得更准确的结果。
-       
-3.网页超级爬虫，强大的网页内容爬取器。
+
+3. 闪电深度研究插件 (FlashDeepSearch)
+
+一个强大的深度研究插件，能够围绕一个主题进行多维度、跨领域的关键词扩展，并综合搜索结果生成研究报告。
+该插件采用三步工作流：
+1) 使用主研究模型根据主题生成多个探索性关键词
+2) 使用搜索模型并发执行关键词联网搜索
+3) 综合所有信息生成完整的研究论文
+
+调用格式：
+<<<[TOOL_REQUEST]>>>
+maid:「始」你的署名「末」,
+tool_name:「始」FlashDeepSearch「末」,
+SearchContent:「始」(必需) 需要进行深度研究的自然语言主题描述。「末」,
+SearchBroadness:「始」(必需) 定义研究的广度，即需要生成的探索性关键词数量，范围: 5-20。建议值: 10-15。「末」
+<<<[END_TOOL_REQUEST]>>>
+
+调用示例：
+<<<[TOOL_REQUEST]>>>
+maid:「始」Nova「末」,
+tool_name:「始」FlashDeepSearch「末」,
+SearchContent:「始」探讨人工智能在气候变化建模中的应用及其伦理影响。「末」,
+SearchBroadness:「始」12「末」
+<<<[END_TOOL_REQUEST]>>>
+
+重要说明：
+- SearchBroadness 越大，研究越全面深入，但耗时也越长
+- 插件会自动生成多维度关键词（中英文混合、跨学科视角）
+- 搜索结果会自动标注引用 URL
+- 最终报告会自动保存到 file/document 目录
+- 插件执行超时限制为 10 分钟
+- 适合用于学术研究、行业分析、技术调研等需要深度信息收集的场景
+
+4.网页超级爬虫，强大的网页内容爬取器。
 tool_name:「始」UrlFetch「末」,
 url:「始」(必需) 要访问的网页 URL。「末」,
 mode:「始」(可选) 模式，'text' (默认) 或 'snapshot' (网页快照)。「末」
 
-4.B站视频爬虫，获取B站视频的TTS转化内容。
+5.B站视频爬虫，获取B站视频的TTS转化内容。
 tool_name:「始」BilibiliFetch「末」,
 url:「始」(必需) Bilibili 视频或直播的 URL。「末」
 
-5.命运与神秘插件-塔罗占卜—
+6.命运与神秘插件-塔罗占卜—
 tool_name: 「始」TarotDivination「末」,
 fate_check_number: 「始」number「末」, // 可选字段，作为占卜师的你，为对方的徘徊抉择一个命运之数！
 单抽指令：command: 「始」draw_single_card「末」

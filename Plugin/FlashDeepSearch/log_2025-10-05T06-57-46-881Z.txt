@@ -1,0 +1,24 @@
+[FlashDeepSearch] 2025-10-05T06:57:46.898Z: 插件启动，接收到请求。
+[FlashDeepSearch] 2025-10-05T06:57:46.902Z: 研究主题: "探讨人工智能在气候变化建模中的应用及其伦理影响。", 搜索广度: 12
+[FlashDeepSearch] 2025-10-05T06:57:46.903Z: 步骤 1: 生成研究关键词...
+[FlashDeepSearch] 2025-10-05T06:57:46.904Z: 调用模型: gemini-2.5-flash-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:53.060Z: DeepSearchModel 原始响应: [Deep Learning Climate Models:] [AI Climate Justice:] [Algorithmic Accountability in Climate Governance:] [Physics-Informed Neural Networks (PINNs):] [AI Carbon Footprint (Sustainability of AI):] [Geoengineering AI Strategy:] [Climate Model Interpretability (XAI):] [Bias in Climate Data Sets:] [气候变化预测不确定性:] [Ethical AI Frameworks for Environmental Science:] [AI-driven Earth System Modeling:] [AI Climate Risk Assessment:]
+[FlashDeepSearch] 2025-10-05T06:57:53.060Z: 成功提取到 12 个关键词。
+[FlashDeepSearch] 2025-10-05T06:57:53.060Z: 步骤 2: 并发执行 12 个搜索任务...
+[FlashDeepSearch] 2025-10-05T06:57:53.061Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:53.063Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:53.064Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:53.065Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:53.069Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:56.891Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:56.895Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:56.897Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:56.900Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:57:56.903Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:58:04.110Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:58:04.112Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:58:10.027Z: 成功完成 12 个搜索任务。
+[FlashDeepSearch] 2025-10-05T06:58:10.028Z: 步骤 3: 生成最终研究报告...
+[FlashDeepSearch] 2025-10-05T06:58:10.028Z: 调用模型: gemini-2.5-flash-preview-09-2025
+[FlashDeepSearch] 2025-10-05T06:58:29.586Z: 最终报告已生成。
+[FlashDeepSearch] 2025-10-05T06:58:29.601Z: 报告已成功保存到: D:\vcp\VCPToolBox-main\file\document\2025-10-05T06-58-29-594Z_探讨人工智能在气候变化建模中的应用及其伦.txt

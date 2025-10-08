@@ -1,0 +1,24 @@
+[FlashDeepSearch] 2025-10-05T08:30:21.321Z: 插件启动，接收到请求。
+[FlashDeepSearch] 2025-10-05T08:30:21.324Z: 研究主题: "GPT-5 攻克量子力学难题的报道与技术背景。", 搜索广度: 12
+[FlashDeepSearch] 2025-10-05T08:30:21.325Z: 步骤 1: 生成研究关键词...
+[FlashDeepSearch] 2025-10-05T08:30:21.325Z: 调用模型: gemini-2.5-flash-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:27.843Z: DeepSearchModel 原始响应: [KeyWord1:] GPT-5 Quantum Physics Breakthrough [KeyWord2:] Large Language Models for Scientific Discovery [KeyWord3:] AI Quantum Simulation [KeyWord4:] 解耦量子态 (Decoupling Quantum States) [KeyWord5:] LLM 科学解释能力 (LLM Scientific Interpretability) [KeyWord6:] Symbolic Regression Physics [KeyWord7:] 量子计算市场报告 (Quantum Computing Market Report) [KeyWord8:] AI Hype Cycle in Fundamental Science [KeyWord9:] 人工智能物理学前沿 (AI Physics Frontier) [KeyWord10:] The Future of Scientific Peer Review by AI [KeyWord11:] GPT-5 Quantum Challenge Skepticism [KeyWord12:] 基础科学的AI范式革命 (AI Paradigm Shift in Basic Science)
+[FlashDeepSearch] 2025-10-05T08:30:27.844Z: 成功提取到 12 个关键词。
+[FlashDeepSearch] 2025-10-05T08:30:27.845Z: 步骤 2: 并发执行 12 个搜索任务...
+[FlashDeepSearch] 2025-10-05T08:30:27.846Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:27.851Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:27.856Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:27.860Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:27.862Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:30.865Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:30.868Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:30.871Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:30.875Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:30.877Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:33.909Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:33.911Z: 调用模型: gemini-2.5-flash-lite-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:36.821Z: 成功完成 12 个搜索任务。
+[FlashDeepSearch] 2025-10-05T08:30:36.822Z: 步骤 3: 生成最终研究报告...
+[FlashDeepSearch] 2025-10-05T08:30:36.822Z: 调用模型: gemini-2.5-flash-preview-09-2025
+[FlashDeepSearch] 2025-10-05T08:30:54.624Z: 最终报告已生成。
+[FlashDeepSearch] 2025-10-05T08:30:54.638Z: 报告已成功保存到: D:\vcp\VCPToolBox-main\file\document\2025-10-05T08-30-54-630Z_GPT-5 攻克量子力学难题的报道与技术.txt
