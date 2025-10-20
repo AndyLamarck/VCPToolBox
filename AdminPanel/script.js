@@ -39,6 +39,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const notesActionStatusSpan = document.getElementById('notes-action-status');
     const searchDailyNotesInput = document.getElementById('search-daily-notes'); // 新增：搜索框
 
+    // RAG Tags Config Elements
+    const ragTagsConfigAreaDiv = document.getElementById('rag-tags-config-area');
+    const ragTagsFolderNameSpan = document.getElementById('rag-tags-folder-name');
+    const ragThresholdEnabledCheckbox = document.getElementById('rag-threshold-enabled');
+    const ragThresholdValueSlider = document.getElementById('rag-threshold-value');
+    const ragThresholdDisplaySpan = document.getElementById('rag-threshold-display');
+    const ragTagsContainer = document.getElementById('rag-tags-container');
+    const addRagTagButton = document.getElementById('add-rag-tag-button');
+    const saveRagTagsConfigButton = document.getElementById('save-rag-tags-config');
+    const ragTagsStatusSpan = document.getElementById('rag-tags-status');
+    
+    let ragTagsData = {}; // 存储所有的RAG-Tags配置
+    let currentRagFolder = null; // 当前选中的文件夹名称
+
     // Agent Manager Elements
     const agentMapListDiv = document.getElementById('agent-map-list');
     const addAgentMapEntryButton = document.getElementById('add-agent-map-entry-button');
@@ -62,7 +76,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const serverLogPathDisplay = document.getElementById('server-log-path-display');
     const serverLogStatusSpan = document.getElementById('server-log-status');
     const serverLogContentPre = document.getElementById('server-log-content');
+    const serverLogFilterInput = document.getElementById('server-log-filter');
     let serverLogIntervalId = null; // For server log auto-refresh
+    let originalLogContent = ''; // To store the full log content for filtering
     
     // Sidebar Search
     const sidebarSearchInput = document.getElementById('sidebar-search');
@@ -982,11 +998,13 @@ Description Length: ${newDescription.length}`);
                 initializePreprocessorOrderManager();
           } else if (sectionIdToActivate === 'semantic-groups-editor-section') {
                initializeSemanticGroupsEditor();
+          } else if (sectionIdToActivate === 'thinking-chains-editor-section') {
+               initializeThinkingChainsEditor();
           }
-        } else {
-            console.warn(`[navigateTo] Target section with ID '${sectionIdToActivate}' not found.`);
-        }
-    }
+       } else {
+           console.warn(`[navigateTo] Target section with ID '${sectionIdToActivate}' not found.`);
+       }
+   }
 
     pluginNavList.addEventListener('click', (event) => {
         const anchor = event.target.closest('a');
@@ -1266,15 +1284,18 @@ Description Length: ${newDescription.length}`);
     // --- Daily Notes Manager Functions ---
     let currentNotesFolder = null;
     let selectedNotes = new Set();
+    let easyMDE = null; // 用于存储EasyMDE实例
 
     async function initializeDailyNotesManager() {
         console.log('Initializing Daily Notes Manager...');
         notesListViewDiv.innerHTML = ''; // Clear previous notes
         noteEditorAreaDiv.style.display = 'none'; // Hide editor
+        ragTagsConfigAreaDiv.style.display = 'none'; // Hide RAG tags config area
         notesActionStatusSpan.textContent = '';
         moveSelectedNotesButton.disabled = true;
         if (deleteSelectedNotesButton) deleteSelectedNotesButton.disabled = true; // 新增：禁用删除按钮
         if (searchDailyNotesInput) searchDailyNotesInput.value = ''; // 清空搜索框
+        await loadRagTagsConfig(); // 加载RAG-Tags配置
         await loadNotesFolders();
         // Optionally, load notes from the first folder automatically or show a placeholder
     }
@@ -1349,6 +1370,10 @@ Description Length: ${newDescription.length}`);
             } else {
                 notesListViewDiv.innerHTML = `<p>文件夹 "${folderName}" 中没有日记。</p>`;
             }
+            
+            // 加载并显示该文件夹的RAG-Tags配置
+            displayRagTagsForFolder(folderName);
+            
         } catch (error) {
             notesListViewDiv.innerHTML = `<p>加载文件夹 "${folderName}" 中的日记失败。</p>`;
             showMessage(`加载日记失败: ${error.message}`, 'error');
@@ -1463,8 +1488,24 @@ Description Length: ${newDescription.length}`);
             const data = await apiFetch(`${API_BASE_URL}/dailynotes/note/${folderName}/${fileName}`);
             editingNoteFolderInput.value = folderName;
             editingNoteFileInput.value = fileName;
+            
+            // 销毁旧的EasyMDE实例（如果存在）
+            if (easyMDE) {
+                easyMDE.toTextArea();
+                easyMDE = null;
+            }
+            
             noteContentEditorTextarea.value = data.content;
             
+            // 初始化EasyMDE
+            easyMDE = new EasyMDE({
+                element: noteContentEditorTextarea,
+                spellChecker: false,
+                status: ['lines', 'words', 'cursor'],
+                minHeight: "500px",
+                maxHeight: "800px"
+            });
+
             document.getElementById('notes-list-view').style.display = 'none';
             document.querySelector('.notes-sidebar').style.display = 'none'; // Hide sidebar too
             document.querySelector('.notes-toolbar').style.display = 'none';
@@ -1479,7 +1520,7 @@ Description Length: ${newDescription.length}`);
     async function saveNoteChanges() {
         const folderName = editingNoteFolderInput.value;
         const fileName = editingNoteFileInput.value;
-        const content = noteContentEditorTextarea.value;
+        const content = easyMDE.value(); // 从EasyMDE获取内容
 
         if (!folderName || !fileName) {
             showMessage('无法保存日记，缺少文件信息。', 'error');
@@ -1503,6 +1544,11 @@ Description Length: ${newDescription.length}`);
     }
 
     function closeNoteEditor() {
+        // 销毁EasyMDE实例
+        if (easyMDE) {
+            easyMDE.toTextArea();
+            easyMDE = null;
+        }
         noteEditorAreaDiv.style.display = 'none';
         editingNoteFolderInput.value = '';
         editingNoteFileInput.value = '';
@@ -1592,6 +1638,157 @@ Description Length: ${newDescription.length}`);
     if (moveSelectedNotesButton) moveSelectedNotesButton.addEventListener('click', moveSelectedNotesHandler);
     if (deleteSelectedNotesButton) deleteSelectedNotesButton.addEventListener('click', deleteSelectedNotesHandler); // 新增：删除按钮事件
     if (searchDailyNotesInput) searchDailyNotesInput.addEventListener('input', filterNotesBySearch);
+
+    // --- RAG Tags Config Functions ---
+    async function loadRagTagsConfig() {
+        try {
+            ragTagsData = await apiFetch(`${API_BASE_URL}/rag-tags`, {}, false);
+            console.log('[RAGTags] Loaded RAG-Tags config:', ragTagsData);
+        } catch (error) {
+            console.error('[RAGTags] Failed to load RAG-Tags config:', error);
+            ragTagsData = {};
+        }
+    }
+
+    function displayRagTagsForFolder(folderName) {
+        currentRagFolder = folderName;
+        ragTagsFolderNameSpan.textContent = folderName;
+        
+        const folderConfig = ragTagsData[folderName] || {};
+        const tags = folderConfig.tags || [];
+        const threshold = folderConfig.threshold;
+        
+        // 设置阈值
+        if (threshold !== undefined) {
+            ragThresholdEnabledCheckbox.checked = true;
+            ragThresholdValueSlider.value = threshold;
+            ragThresholdValueSlider.disabled = false;
+            ragThresholdDisplaySpan.textContent = threshold.toFixed(2);
+        } else {
+            ragThresholdEnabledCheckbox.checked = false;
+            ragThresholdValueSlider.value = 0.7;
+            ragThresholdValueSlider.disabled = true;
+            ragThresholdDisplaySpan.textContent = '0.70';
+        }
+        
+        // 清空并重新创建标签
+        ragTagsContainer.innerHTML = '';
+        tags.forEach((tagData) => {
+            const tagValue = typeof tagData === 'string' ? tagData : (tagData.tag || '');
+            addTagItem(tagValue);
+        });
+        
+        // 显示配置区域
+        ragTagsConfigAreaDiv.style.display = 'block';
+        ragTagsStatusSpan.textContent = '';
+    }
+
+    function addTagItem(value = '') {
+        const tagDiv = document.createElement('div');
+        tagDiv.className = 'tag-item';
+        
+        const tagInput = document.createElement('input');
+        tagInput.type = 'text';
+        tagInput.className = 'tag-input';
+        tagInput.value = value;
+        tagInput.placeholder = '标签:权重(可选)';
+        tagDiv.appendChild(tagInput);
+
+        const deleteBtn = document.createElement('button');
+        deleteBtn.className = 'delete-tag-btn';
+        deleteBtn.textContent = '×';
+        deleteBtn.onclick = () => tagDiv.remove();
+        tagDiv.appendChild(deleteBtn);
+
+        ragTagsContainer.appendChild(tagDiv);
+        if (!value) {
+            tagInput.focus();
+        }
+    }
+
+    async function saveRagTagsConfigHandler() {
+        if (!currentRagFolder) {
+            showMessage('未选中知识库文件夹', 'error');
+            return;
+        }
+
+        ragTagsStatusSpan.textContent = '保存中...';
+        ragTagsStatusSpan.className = 'status-message';
+
+        try {
+            // 构建当前文件夹的配置
+            const folderConfig = {};
+            
+            // 处理标签 - 从tag-item读取
+            const tagInputs = ragTagsContainer.querySelectorAll('.tag-input');
+            const tags = [];
+            tagInputs.forEach(input => {
+                const value = input.value.trim();
+                if (value) {
+                    tags.push(value);
+                }
+            });
+            folderConfig.tags = tags;
+            
+            // 处理阈值
+            if (ragThresholdEnabledCheckbox.checked) {
+                folderConfig.threshold = parseFloat(ragThresholdValueSlider.value);
+            }
+            
+            // 更新本地数据
+            if (folderConfig.tags.length > 0 || folderConfig.threshold !== undefined) {
+                ragTagsData[currentRagFolder] = folderConfig;
+            } else {
+                // 如果没有配置任何内容，则删除该条目
+                delete ragTagsData[currentRagFolder];
+            }
+            
+            // 保存到服务器
+            await apiFetch(`${API_BASE_URL}/rag-tags`, {
+                method: 'POST',
+                body: JSON.stringify(ragTagsData)
+            });
+
+            ragTagsStatusSpan.textContent = '✓ 保存成功';
+            ragTagsStatusSpan.className = 'status-message success';
+            showMessage('RAG-Tags配置已保存', 'success');
+            
+            // 3秒后清空状态
+            setTimeout(() => {
+                ragTagsStatusSpan.textContent = '';
+            }, 3000);
+
+        } catch (error) {
+            console.error('[RAGTags] Save failed:', error);
+            ragTagsStatusSpan.textContent = '✗ 保存失败';
+            ragTagsStatusSpan.className = 'status-message error';
+            showMessage(`保存RAG-Tags配置失败: ${error.message}`, 'error');
+        }
+    }
+
+    // RAG Tags 事件监听器
+    if (ragThresholdEnabledCheckbox) {
+        ragThresholdEnabledCheckbox.addEventListener('change', () => {
+            ragThresholdValueSlider.disabled = !ragThresholdEnabledCheckbox.checked;
+        });
+    }
+    
+    if (ragThresholdValueSlider) {
+        ragThresholdValueSlider.addEventListener('input', () => {
+            ragThresholdDisplaySpan.textContent = parseFloat(ragThresholdValueSlider.value).toFixed(2);
+        });
+    }
+    
+    if (addRagTagButton) {
+        addRagTagButton.addEventListener('click', () => {
+            addTagItem();
+        });
+    }
+    
+    if (saveRagTagsConfigButton) {
+        saveRagTagsConfigButton.addEventListener('click', saveRagTagsConfigHandler);
+    }
+    // --- End RAG Tags Config Functions ---
 
 
     // --- End Daily Notes Manager Functions ---
@@ -2053,6 +2250,44 @@ Description Length: ${newDescription.length}`);
             serverLogIntervalId = setInterval(loadServerLog, 2000); // Poll every 2 seconds
             console.log('Started server log auto-refresh interval.');
         }
+        if (serverLogFilterInput) serverLogFilterInput.value = ''; // Clear filter on init
+
+        await loadServerLog(); // Perform the initial load
+
+        // Start polling after the initial load
+        if (!serverLogIntervalId) {
+            serverLogIntervalId = setInterval(loadServerLog, 2000); // Poll every 2 seconds
+            console.log('Started server log auto-refresh interval.');
+        }
+    }
+
+    function filterAndHighlightLog() {
+        if (!serverLogContentPre || !serverLogFilterInput) return;
+
+        const filterValue = serverLogFilterInput.value.trim().toLowerCase();
+        
+        if (!filterValue) {
+            serverLogContentPre.textContent = originalLogContent;
+            return;
+        }
+
+        const lines = originalLogContent.split('\n');
+        const filteredLines = [];
+        const escapedFilterValue = filterValue.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
+        const highlightRegex = new RegExp(escapedFilterValue, 'gi');
+
+        for (const line of lines) {
+            if (line.toLowerCase().includes(filterValue)) {
+                const highlightedLine = line.replace(highlightRegex, (match) => `<span class="highlight">${match}</span>`);
+                filteredLines.push(highlightedLine);
+            }
+        }
+
+        if (filteredLines.length > 0) {
+            serverLogContentPre.innerHTML = filteredLines.join('\n');
+        } else {
+            serverLogContentPre.textContent = `没有找到包含 "${serverLogFilterInput.value}" 的日志条目。`;
+        }
     }
 
     async function loadServerLog() {
@@ -2064,14 +2299,19 @@ Description Length: ${newDescription.length}`);
         serverLogStatusSpan.className = 'status-message info';
         try {
             const data = await apiFetch(`${API_BASE_URL}/server-log`);
-            serverLogContentPre.textContent = data.content || '日志内容为空或加载失败。';
+            originalLogContent = data.content || '日志内容为空或加载失败。';
             serverLogPathDisplay.textContent = `当前日志文件: ${data.path || '未知'}`;
             serverLogStatusSpan.textContent = '日志已加载。';
             serverLogStatusSpan.className = 'status-message success';
-            // Scroll to bottom
-            serverLogContentPre.scrollTop = serverLogContentPre.scrollHeight;
+            
+            filterAndHighlightLog();
+
+            if (!serverLogFilterInput.value.trim()) {
+                serverLogContentPre.scrollTop = serverLogContentPre.scrollHeight;
+            }
         } catch (error) {
-            serverLogContentPre.textContent = `加载服务器日志失败: ${error.message}\n\n(可能是因为服务器刚刚重启，日志文件路径已更改，或日志文件为空。)`;
+            originalLogContent = `加载服务器日志失败: ${error.message}\n\n(可能是因为服务器刚刚重启，日志文件路径已更改，或日志文件为空。)`;
+            serverLogContentPre.textContent = originalLogContent;
             serverLogPathDisplay.textContent = `当前日志文件: 未知`;
             serverLogStatusSpan.textContent = `加载失败: ${error.message}`;
             serverLogStatusSpan.className = 'status-message error';
@@ -2083,6 +2323,9 @@ Description Length: ${newDescription.length}`);
     if (copyServerLogButton) { // Changed from refreshServerLogButton
         copyServerLogButton.addEventListener('click', copyServerLogToClipboard);
     }
+    if (serverLogFilterInput) {
+        serverLogFilterInput.addEventListener('input', filterAndHighlightLog);
+    }
 
     async function copyServerLogToClipboard() {
         if (!serverLogContentPre) {
@@ -2090,39 +2333,59 @@ Description Length: ${newDescription.length}`);
             return;
         }
         const logContent = serverLogContentPre.textContent;
-        if (!logContent || logContent === '正在加载日志...' || logContent.startsWith('加载服务器日志失败')) {
+        if (!logContent || logContent === '正在加载日志...' || logContent.startsWith('加载服务器日志失败') || logContent.startsWith('没有找到包含')) {
             showMessage('没有可复制的日志内容。', 'info');
             return;
         }
 
+        // 优先使用现代的 Clipboard API，它更安全、更可靠
+        if (navigator.clipboard && window.isSecureContext) {
+            try {
+                await navigator.clipboard.writeText(logContent);
+                showMessage('日志内容已复制到剪贴板！', 'success');
+                serverLogStatusSpan.textContent = '日志已复制!';
+                serverLogStatusSpan.className = 'status-message success';
+                setTimeout(() => {
+                    if (serverLogStatusSpan.textContent === '日志已复制!') {
+                        serverLogStatusSpan.textContent = '日志已加载。';
+                    }
+                }, 3000);
+                return; // 成功后直接返回
+            } catch (err) {
+                console.warn('navigator.clipboard.writeText 失败，尝试使用旧方法。', err);
+            }
+        }
+
+        // 回退方案：使用 document.execCommand('copy')
+        const textArea = document.createElement("textarea");
+        textArea.value = logContent;
+        textArea.style.position = "fixed"; // 移出屏幕外
+        textArea.style.top = "-9999px";
+        textArea.style.left = "-9999px";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
         try {
-            await navigator.clipboard.writeText(logContent);
-            showMessage('日志内容已复制到剪贴板！', 'success');
-            serverLogStatusSpan.textContent = '日志已复制!';
-            serverLogStatusSpan.className = 'status-message success';
+            const successful = document.execCommand('copy');
+            if (successful) {
+                showMessage('日志内容已复制到剪贴板！', 'success');
+                serverLogStatusSpan.textContent = '日志已复制!';
+                serverLogStatusSpan.className = 'status-message success';
+            } else {
+                throw new Error('document.execCommand 返回 false');
+            }
+        } catch (err) {
+            console.error('无法复制日志: ', err);
+            showMessage('无法自动复制日志。您的浏览器可能不支持此功能或权限不足。', 'error');
+            serverLogStatusSpan.textContent = '复制失败';
+            serverLogStatusSpan.className = 'status-message error';
+        } finally {
+            document.body.removeChild(textArea);
             setTimeout(() => {
                 if (serverLogStatusSpan.textContent === '日志已复制!') {
-                     serverLogStatusSpan.textContent = '日志已加载。'; // Revert after a few seconds
+                    serverLogStatusSpan.textContent = '日志已加载。';
                 }
             }, 3000);
-        } catch (err) {
-            console.error('无法自动复制日志: ', err);
-            // Fallback: Try to select the text for manual copying
-            try {
-                serverLogContentPre.focus(); // Focus the element
-                const range = document.createRange();
-                range.selectNodeContents(serverLogContentPre);
-                const selection = window.getSelection();
-                selection.removeAllRanges();
-                selection.addRange(range);
-                showMessage('自动复制失败。日志内容已选中，请按 Ctrl+C (或 Cmd+C) 手动复制。', 'info', 5000);
-                serverLogStatusSpan.textContent = '请手动复制';
-            } catch (selectErr) {
-                console.error('选择文本以便手动复制失败: ', selectErr);
-                showMessage('自动复制失败，也无法选中内容供手动复制。请尝试手动选择并复制。', 'error', 5000);
-                serverLogStatusSpan.textContent = '复制失败';
-            }
-            serverLogStatusSpan.className = 'status-message error'; // Keep error class for status
         }
     }
     // --- End Server Log Viewer Functions ---
@@ -2478,5 +2741,301 @@ Description Length: ${newDescription.length}`);
         addSemanticGroupButton.addEventListener('click', addNewSemanticGroup);
     }
     // --- End Semantic Groups Editor Functions ---
+
+    // --- Thinking Chains Editor Functions ---
+    let thinkingChainsData = {};
+    let availableClusters = [];
+
+    async function initializeThinkingChainsEditor() {
+        console.log('Initializing Thinking Chains Editor...');
+        const container = document.getElementById('thinking-chains-container');
+        const statusSpan = document.getElementById('thinking-chains-status');
+        if (!container || !statusSpan) return;
+
+        container.innerHTML = '<p>正在加载思维链配置...</p>';
+        statusSpan.textContent = '';
+        try {
+            // Fetch both chains and available clusters concurrently
+            const [chainsResponse, clustersResponse] = await Promise.all([
+                apiFetch(`${API_BASE_URL}/thinking-chains`),
+                apiFetch(`${API_BASE_URL}/available-clusters`)
+            ]);
+            
+            thinkingChainsData = chainsResponse;
+            availableClusters = clustersResponse.clusters || [];
+            
+            renderThinkingChainsEditor(container);
+
+        } catch (error) {
+            container.innerHTML = `<p class="error-message">加载思维链配置失败: ${error.message}</p>`;
+        }
+    }
+
+    function renderThinkingChainsEditor(container) {
+        container.innerHTML = '';
+        const themes = thinkingChainsData.chains || {};
+
+        const editorWrapper = document.createElement('div');
+        editorWrapper.className = 'thinking-chains-editor-wrapper';
+
+        const themesContainer = document.createElement('div');
+        themesContainer.id = 'thinking-chains-themes-container'; // Add ID for easy access
+        themesContainer.className = 'thinking-chains-themes-container';
+
+        if (Object.keys(themes).length === 0) {
+            themesContainer.innerHTML = '<p>没有找到任何思维链主题。请点击“添加新主题”来创建一个。</p>';
+        } else {
+            for (const themeName in themes) {
+                const themeElement = createThemeElement(themeName, themes[themeName]);
+                themesContainer.appendChild(themeElement);
+            }
+        }
+
+        const availableClustersElement = createAvailableClustersElement();
+
+        editorWrapper.appendChild(themesContainer);
+        editorWrapper.appendChild(availableClustersElement);
+        container.appendChild(editorWrapper);
+    }
+
+    function createThemeElement(themeName, chain) {
+        const details = document.createElement('details');
+        details.className = 'theme-details';
+        details.open = true;
+        details.dataset.themeName = themeName;
+
+        const summary = document.createElement('summary');
+        summary.className = 'theme-summary';
+        
+        const themeNameSpan = document.createElement('span');
+        themeNameSpan.className = 'theme-name-display';
+        themeNameSpan.textContent = `主题: ${themeName}`;
+        summary.appendChild(themeNameSpan);
+
+        const deleteThemeBtn = document.createElement('button');
+        deleteThemeBtn.textContent = '删除该主题';
+        deleteThemeBtn.className = 'delete-theme-btn';
+        deleteThemeBtn.onclick = (e) => {
+            e.preventDefault();
+            if (confirm(`确定要删除主题 "${themeName}" 吗？`)) {
+                details.remove();
+            }
+        };
+        summary.appendChild(deleteThemeBtn);
+        details.appendChild(summary);
+
+        const content = document.createElement('div');
+        content.className = 'theme-content';
+        
+        const chainList = document.createElement('ul');
+        chainList.className = 'draggable-list theme-chain-list';
+        chainList.dataset.themeName = themeName;
+
+        if (chain.length > 0) {
+            chain.forEach(clusterName => {
+                const listItem = createChainItemElement(clusterName);
+                chainList.appendChild(listItem);
+            });
+        } else {
+            // Add a placeholder to make empty lists a valid drop target
+            const placeholder = document.createElement('li');
+            placeholder.className = 'drop-placeholder';
+            placeholder.textContent = '将思维簇拖拽到此处';
+            chainList.appendChild(placeholder);
+        }
+
+        content.appendChild(chainList);
+        details.appendChild(content);
+
+        // Add drag and drop functionality to the list
+        setupDragAndDrop(chainList);
+
+        return details;
+    }
+
+    function createChainItemElement(clusterName) {
+        const li = document.createElement('li');
+        li.className = 'chain-item';
+        li.draggable = true;
+        li.dataset.clusterName = clusterName;
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'cluster-name';
+        nameSpan.textContent = clusterName;
+        li.appendChild(nameSpan);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.textContent = '×';
+        removeBtn.className = 'remove-cluster-btn';
+        removeBtn.onclick = () => li.remove();
+        li.appendChild(removeBtn);
+        
+        // Add drag listeners to the item itself
+        li.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', clusterName);
+            e.dataTransfer.effectAllowed = 'move';
+            setTimeout(() => li.classList.add('dragging'), 0);
+        });
+        li.addEventListener('dragend', () => li.classList.remove('dragging'));
+
+        return li;
+    }
+
+    function createAvailableClustersElement() {
+        const container = document.createElement('div');
+        container.className = 'available-clusters-container';
+
+        const title = document.createElement('h3');
+        title.textContent = '可用的思维簇模块';
+        container.appendChild(title);
+        
+        const p = document.createElement('p');
+        p.className = 'description';
+        p.textContent = '将模块从这里拖拽到左侧的主题列表中。';
+        container.appendChild(p);
+
+        const list = document.createElement('ul');
+        list.className = 'draggable-list available-clusters-list';
+
+        availableClusters.forEach(clusterName => {
+            const listItem = createChainItemElement(clusterName);
+            // Make it a template for dragging, not a removable item
+            listItem.querySelector('.remove-cluster-btn').remove();
+            list.appendChild(listItem);
+        });
+
+        container.appendChild(list);
+        return container;
+    }
+
+    function setupDragAndDrop(listElement) {
+        listElement.addEventListener('dragover', e => {
+            e.preventDefault();
+            const afterElement = getDragAfterElement(listElement, e.clientY);
+            const dragging = document.querySelector('.dragging');
+            if (dragging) {
+                if (afterElement == null) {
+                    listElement.appendChild(dragging);
+                } else {
+                    listElement.insertBefore(dragging, afterElement);
+                }
+            }
+        });
+
+        listElement.addEventListener('drop', e => {
+            e.preventDefault();
+            const clusterName = e.dataTransfer.getData('text/plain');
+            const dragging = document.querySelector('.dragging'); // This is the placeholder moved by dragover
+
+            if (!dragging) return;
+
+            const isFromAvailable = !dragging.querySelector('.remove-cluster-btn');
+
+            if (isFromAvailable) {
+                // It's a new item from the available list.
+                
+                // Remove placeholder for empty lists if it exists
+                const placeholder = listElement.querySelector('.drop-placeholder');
+                if (placeholder) placeholder.remove();
+
+                // Check for duplicates, ignoring the placeholder ('dragging') itself
+                const alreadyExists = Array.from(listElement.querySelectorAll('.chain-item'))
+                                         .filter(item => item !== dragging)
+                                         .some(item => item.dataset.clusterName === clusterName);
+
+                if (clusterName && !alreadyExists) {
+                    const newItem = createChainItemElement(clusterName);
+                    // Replace the placeholder ('dragging') with the new item
+                    listElement.replaceChild(newItem, dragging);
+                } else {
+                    // If it's a duplicate or invalid, just remove the placeholder
+                    dragging.remove();
+                }
+
+                // Restore the available clusters list to fix the "consumed" bug
+                const editorContainer = document.getElementById('thinking-chains-container');
+                const oldAvailableContainer = editorContainer.querySelector('.available-clusters-container');
+                if (oldAvailableContainer) {
+                    const newAvailableContainer = createAvailableClustersElement();
+                    oldAvailableContainer.replaceWith(newAvailableContainer);
+                }
+            }
+            // If it's a reorder, 'dragover' already moved it, and we're done.
+        });
+    }
+
+    async function saveThinkingChains() {
+        const container = document.getElementById('thinking-chains-container');
+        const statusSpan = document.getElementById('thinking-chains-status');
+        if (!container || !statusSpan) return;
+
+        const newChains = {};
+        const themeElements = container.querySelectorAll('.theme-details');
+
+        themeElements.forEach(el => {
+            const themeName = el.dataset.themeName;
+            const clusters = [];
+            el.querySelectorAll('.chain-item').forEach(item => {
+                clusters.push(item.dataset.clusterName);
+            });
+            newChains[themeName] = clusters;
+        });
+
+        const dataToSave = {
+            ...thinkingChainsData, // Preserve other top-level keys like description, version
+            chains: newChains
+        };
+
+        statusSpan.textContent = '正在保存...';
+        statusSpan.className = 'status-message info';
+        try {
+            await apiFetch(`${API_BASE_URL}/thinking-chains`, {
+                method: 'POST',
+                body: JSON.stringify(dataToSave)
+            });
+            showMessage('思维链配置已成功保存!', 'success');
+            statusSpan.textContent = '保存成功!';
+            statusSpan.className = 'status-message success';
+            // Reload to ensure UI is consistent with saved data
+            initializeThinkingChainsEditor();
+        } catch (error) {
+            statusSpan.textContent = `保存失败: ${error.message}`;
+            statusSpan.className = 'status-message error';
+        }
+    }
+
+    function addNewThinkingChainTheme() {
+        const themeName = prompt('请输入新思维链主题的名称 (例如: creative-writing):');
+        if (!themeName || !themeName.trim()) return;
+
+        const normalizedThemeName = themeName.trim();
+        const container = document.getElementById('thinking-chains-themes-container');
+        if (!container) return;
+
+        if (container.querySelector(`[data-theme-name="${normalizedThemeName}"]`)) {
+            showMessage(`主题 "${normalizedThemeName}" 已存在!`, 'error');
+            return;
+        }
+        
+        if (!container.querySelector('.theme-details')) {
+            container.innerHTML = '';
+        }
+
+        const newThemeElement = createThemeElement(normalizedThemeName, []);
+        container.appendChild(newThemeElement);
+        newThemeElement.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Event Listeners for Thinking Chains Editor
+    const saveThinkingChainsButton = document.getElementById('save-thinking-chains-button');
+    const addThinkingChainThemeButton = document.getElementById('add-thinking-chain-theme-button');
+
+    if (saveThinkingChainsButton) {
+        saveThinkingChainsButton.addEventListener('click', saveThinkingChains);
+    }
+    if (addThinkingChainThemeButton) {
+        addThinkingChainThemeButton.addEventListener('click', addNewThinkingChainTheme);
+    }
+    // --- End Thinking Chains Editor Functions ---
     });
 
