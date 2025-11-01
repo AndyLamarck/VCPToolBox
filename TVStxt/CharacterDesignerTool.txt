@@ -1,0 +1,218 @@
+[CharacterDesigner专属工具]
+
+## 文件操作工具
+
+### 1. FileOperator
+**功能：** 文件和目录的创建、读取、编辑、删除操作
+**用途：** 创建角色卡文件、编辑配置文件、管理目录结构
+**调用示例：**
+
+创建文件：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」CreateFile「末」,
+filePath:「始」Agent/NewAgent.txt「末」,
+content:「始」角色卡内容「末」
+<<<[END_TOOL_REQUEST]>>>
+
+读取文件：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」ReadFile「末」,
+filePath:「始」Agent/ExistingAgent.txt「末」
+<<<[END_TOOL_REQUEST]>>>
+
+编辑文件（应用diff）：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」ApplyDiff「末」,
+filePath:「始」Agent/AgentToEdit.txt「末」,
+diff:「始」
+--- old content
++++ new content
+「末」
+<<<[END_TOOL_REQUEST]>>>
+
+创建目录：
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」CreateDirectory「末」,
+dirPath:「始」dailynote/NewAgentName「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 日记管理工具
+
+### 2. DailyNoteWrite
+**功能：** 写入日记条目到知识库
+**用途：** 记录角色设计经验、最佳实践、常见问题解决方案
+**调用示例：**
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteWrite「末」,
+maid:「始」CharacterDesigner「末」,
+content:「始」
+[角色设计经验]
+
+今天帮助用户创建了一个代码审查Agent。
+关键设计点：
+1. 强调建设性反馈而非批评
+2. 使用优先级分类（Critical/Important/Minor）
+3. 提供具体示例和改进建议
+4. 平衡专业性和友好性
+
+用户反馈：非常满意，特别喜欢正面观察部分。
+
+经验总结：专家型Agent需要在权威性和亲和力之间找到平衡。
+「末」,
+tags:「始」[角色设计][专家型Agent][最佳实践]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+### 3. DailyNoteManager
+**功能：** 管理和整理日记本
+**用途：** 整理知识库、合并重复内容、优化标签
+**调用示例：**
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteManager「末」,
+maid:「始」CharacterDesigner「末」,
+action:「始」Organize「末」,
+targetDiary:「始」CharacterDesigner日记本「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 目录结构工具
+
+### 4. FileTreeGenerator
+**功能：** 生成目录结构
+**用途：** 创建Agent所需的完整目录结构
+**调用示例：**
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileTreeGenerator「末」,
+maid:「始」CharacterDesigner「末」,
+basePath:「始」dailynote「末」,
+structure:「始」
+NewAgentName/
+  - 2025-10-21-initial.txt
+  - README.md
+「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 搜索和研究工具
+
+### 5. TavilySearch
+**功能：** 在线搜索信息
+**用途：** 查找最佳实践、设计模式、技术文档
+**调用示例：**
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」TavilySearch「末」,
+maid:「始」CharacterDesigner「末」,
+query:「始」AI agent character design best practices「末」,
+maxResults:「始」5「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 计算工具
+
+### 6. SciCalculator
+**功能：** 科学计算
+**用途：** 计算复杂度、评估性能指标
+**调用示例：**
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」SciCalculator「末」,
+maid:「始」CharacterDesigner「末」,
+expression:「始」(200 + 300) / 2「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 工具使用最佳实践
+
+### 文件操作
+1. **创建前检查**：在创建文件前，先检查是否已存在
+2. **备份重要文件**：编辑重要文件前，建议先备份
+3. **使用相对路径**：使用相对于工作目录的路径
+4. **命名规范**：遵循VCP命名规范（如Agent/AgentName.txt）
+
+### 日记写入
+1. **及时记录**：完成重要任务后立即记录
+2. **使用标签**：添加相关标签便于后续检索
+3. **结构化内容**：使用清晰的标题和分段
+4. **记录关键信息**：包括问题、解决方案、经验教训
+
+### 串语法使用
+可以在一个TOOL_REQUEST中执行多个操作：
+
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command1:「始」CreateDirectory「末」,
+dirPath1:「始」dailynote/NewAgent「末」,
+command2:「始」CreateFile「末」,
+filePath2:「始」Agent/NewAgent.txt「末」,
+content2:「始」角色卡内容「末」,
+command3:「始」CreateFile「末」,
+filePath3:「始」dailynote/NewAgent/README.md「末」,
+content3:「始」# NewAgent日记本「末」
+<<<[END_TOOL_REQUEST]>>>
+
+### 错误处理
+1. **检查返回结果**：确认操作是否成功
+2. **处理失败情况**：如果操作失败，分析原因并重试
+3. **提供反馈**：向用户说明操作结果
+
+## 工作流示例
+
+### 完整的Agent创建流程
+
+1. **创建目录结构**
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」CreateDirectory「末」,
+dirPath:「始」dailynote/NewAgentName「末」
+<<<[END_TOOL_REQUEST]>>>
+
+2. **创建角色卡文件**
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」CreateFile「末」,
+filePath:「始」Agent/NewAgentName.txt「末」,
+content:「始」[完整的角色卡内容]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+3. **创建工具描述文件（如需要）**
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」FileOperator「末」,
+maid:「始」CharacterDesigner「末」,
+command:「始」CreateFile「末」,
+filePath:「始」TVStxt/NewAgentNameTool.txt「末」,
+content:「始」[工具描述内容]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+4. **记录创作经验**
+<<<[TOOL_REQUEST]>>>
+tool_name:「始」DailyNoteWrite「末」,
+maid:「始」CharacterDesigner「末」,
+content:「始」
+[NewAgentName创作记录]
+
+创作时间：{{Date}}
+Agent类型：[类型]
+核心特质：[特质列表]
+设计亮点：[亮点说明]
+用户反馈：[反馈内容]
+「末」,
+tags:「始」[角色设计][NewAgentName][创作记录]「末」
+<<<[END_TOOL_REQUEST]>>>
+
+## 注意事项
+
+1. **始终包含maid字段**：标识操作的执行者
+2. **使用正确的路径**：确保路径相对于工作目录
+3. **遵循VCP规范**：文件命名、目录结构等
+4. **及时记录经验**：建立知识库
+5. **测试生成的配置**：确保可以正常使用

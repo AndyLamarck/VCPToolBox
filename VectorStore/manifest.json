@@ -152,5 +152,20 @@
     "Chapter23_转座.txt": "b01ca8c0dbf3d669320269a7320cd131",
     "Chapter24_基因组学I_全基因组测序.txt": "15e09920ef41e63324f8a4476c8c60b6",
     "Chapter25_基因组学II_功能基因组学_蛋白质组学和生物信息学.txt": "a34707509b1bd22a111db066fea44acb"
+  },
+  "VCP规范": {
+    "01_占位符系统.txt": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "角色设计理论": {
+    "01_角色塑造方法论.txt": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "思维簇配置": {
+    "01_思维簇系统概述.txt": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "角色卡示例": {
+    "01_专家型Agent示例_CodeReviewer.txt": "d41d8cd98f00b204e9800998ecf8427e"
+  },
+  "CharacterDesigner": {
+    "README.md": "d41d8cd98f00b204e9800998ecf8427e"
   }
 }
