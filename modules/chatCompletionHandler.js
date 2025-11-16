@@ -19,7 +19,11 @@ async function getRealAuthCode(debugMode = false) {
 }
 
 // A helper function to handle fetch with retries for specific status codes
-async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode = false) {
+async function fetchWithRetry(
+  url,
+  options,
+  { retries = 3, delay = 1000, debugMode = false, onRetry = null } = {},
+) {
   const { default: fetch } = await import('node-fetch');
   for (let i = 0; i < retries; i++) {
     try {
@@ -29,6 +33,9 @@ async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode
           console.warn(
             `[Fetch Retry] Received status ${response.status}. Retrying in ${delay}ms... (${i + 1}/${retries})`,
           );
+        }
+        if (onRetry) {
+          await onRetry(i + 1, { status: response.status, message: response.statusText });
         }
         await new Promise(resolve => setTimeout(resolve, delay * (i + 1))); // Increase delay for subsequent retries
         continue; // Try again
@@ -48,6 +55,9 @@ async function fetchWithRetry(url, options, retries = 3, delay = 1000, debugMode
         console.warn(
           `[Fetch Retry] Fetch failed with error: ${error.message}. Retrying in ${delay}ms... (${i + 1}/${retries})`,
         );
+      }
+      if (onRetry) {
+        await onRetry(i + 1, { status: 'NETWORK_ERROR', message: error.message });
       }
       await new Promise(resolve => setTimeout(resolve, delay * (i + 1)));
     }
@@ -89,12 +99,19 @@ class ChatCompletionHandler {
     const abortController = new AbortController();
 
     if (id) {
-      activeRequests.set(id, { req, res, abortController, timestamp: Date.now() });
+      activeRequests.set(id, {
+        req,
+        res,
+        abortController,
+        timestamp: Date.now(),
+        aborted: false // 修复 Bug #4: 添加中止标志
+      });
     }
 
-    try {
-      let originalBody = req.body;
+    let originalBody = req.body;
+    const isOriginalRequestStreaming = originalBody.stream === true;
 
+    try {
       if (originalBody.model) {
         const originalModel = originalBody.model;
         const redirectedModel = modelRedirectHandler.redirectModelForBackend(originalModel);
@@ -220,7 +237,6 @@ class ChatCompletionHandler {
       originalBody.messages = processedMessages;
       await writeDebugLog('LogOutputAfterProcessing', originalBody);
 
-      const isOriginalRequestStreaming = originalBody.stream === true;
       const willStreamResponse = isOriginalRequestStreaming;
 
       let firstAiAPIResponse = await fetchWithRetry(
@@ -236,16 +252,73 @@ class ChatCompletionHandler {
           body: JSON.stringify({ ...originalBody, stream: willStreamResponse }),
           signal: abortController.signal,
         },
-        apiRetries,
-        apiRetryDelay,
-        DEBUG_MODE,
+        {
+          retries: apiRetries,
+          delay: apiRetryDelay,
+          debugMode: DEBUG_MODE,
+          onRetry: async (attempt, errorInfo) => {
+            if (!res.headersSent && isOriginalRequestStreaming) {
+              if (DEBUG_MODE)
+                console.log(`[VCP Retry] First retry attempt (#${attempt}). Sending 200 OK to client to establish stream.`);
+              res.status(200);
+              res.setHeader('Content-Type', 'text/event-stream');
+              res.setHeader('Cache-Control', 'no-cache');
+              res.setHeader('Connection', 'keep-alive');
+            }
+          },
+        },
       );
 
       const isUpstreamStreaming =
         willStreamResponse && firstAiAPIResponse.headers.get('content-type')?.includes('text/event-stream');
 
       if (!res.headersSent) {
-        res.status(firstAiAPIResponse.status);
+        const upstreamStatus = firstAiAPIResponse.status;
+
+        if (isOriginalRequestStreaming && upstreamStatus !== 200) {
+          // If streaming was requested, but upstream returned a non-200 status (e.g., 400, 401, 502, 504),
+          // we must return 200 OK and stream the error as an SSE chunk to prevent client listener termination.
+          res.status(200);
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+
+          // Read the error body from the upstream response
+          const errorBodyText = await firstAiAPIResponse.text();
+
+          // Log the error
+          console.error(`[Upstream Error Stream Proxy] Upstream API returned status ${upstreamStatus}. Streaming error to client: ${errorBodyText}`);
+
+          // Construct the error message for the client
+          const errorContent = `[UPSTREAM_ERROR] 上游API返回状态码 ${upstreamStatus}，错误信息: ${errorBodyText}`;
+
+          // Send an error chunk
+          const errorPayload = {
+            id: `chatcmpl-VCP-upstream-error-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: originalBody.model || 'unknown',
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content: errorContent,
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          };
+          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+          res.write('data: [DONE]\n\n', () => {
+            res.end();
+          });
+
+          // We are done with this request. Return early.
+          return;
+        }
+
+        // Normal header setting for non-streaming or successful streaming responses
+        res.status(upstreamStatus);
         firstAiAPIResponse.headers.forEach((value, name) => {
           if (
             !['content-encoding', 'transfer-encoding', 'connection', 'content-length', 'keep-alive'].includes(
@@ -277,10 +350,30 @@ class ChatCompletionHandler {
             let sseBuffer = ''; // Buffer for incomplete SSE lines
             let collectedContentThisTurn = ''; // Collects textual content from delta
             let rawResponseDataThisTurn = ''; // Collects all raw chunks for diary
-
             let sseLineBuffer = ''; // Buffer for incomplete SSE lines
+            let streamAborted = false; // 修复 Bug #5: 添加流中止标志
+
+            // 修复 Bug #5: 监听 abort 信号
+            const abortHandler = () => {
+              streamAborted = true;
+              if (DEBUG_MODE) console.log('[Stream Abort] Abort signal received, stopping stream processing.');
+              
+              // 销毁响应流以停止数据接收
+              if (aiResponse.body && !aiResponse.body.destroyed) {
+                aiResponse.body.destroy();
+              }
+              
+              // 立即 resolve 以退出流处理
+              resolve({ content: collectedContentThisTurn, raw: rawResponseDataThisTurn });
+            };
+            
+            if (abortController && abortController.signal) {
+              abortController.signal.addEventListener('abort', abortHandler);
+            }
 
             aiResponse.body.on('data', chunk => {
+              // 修复 Bug #5: 如果已中止，忽略后续数据
+              if (streamAborted) return;
               const chunkString = chunk.toString('utf-8');
               rawResponseDataThisTurn += chunkString;
               sseLineBuffer += chunkString;
@@ -356,8 +449,14 @@ class ChatCompletionHandler {
                 }
               }
 
-              if (!res.writableEnded && chunkToWrite.trim().length > 0) {
-                res.write(chunkToWrite);
+              // 修复 Bug #5: 写入前检查响应状态和中止标志
+              if (!streamAborted && !res.writableEnded && !res.destroyed && chunkToWrite.trim().length > 0) {
+                try {
+                  res.write(chunkToWrite);
+                } catch (writeError) {
+                  if (DEBUG_MODE) console.error('[Stream Write Error]', writeError.message);
+                  streamAborted = true; // 标记为已中止，停止后续写入
+                }
               }
 
               if (containsDoneMarker) {
@@ -411,9 +510,18 @@ class ChatCompletionHandler {
                   }
                 }
               }
+              // 修复 Bug #5: 移除 abort 监听器
+              if (abortController && abortController.signal) {
+                abortController.signal.removeEventListener('abort', abortHandler);
+              }
               resolve({ content: collectedContentThisTurn, raw: rawResponseDataThisTurn });
             }
+            
             aiResponse.body.on('error', streamError => {
+              // 修复 Bug #5: 移除 abort 监听器
+              if (abortController && abortController.signal) {
+                abortController.signal.removeEventListener('abort', abortHandler);
+              }
               console.error('Error reading AI response stream in loop:', streamError);
               if (!res.writableEnded) {
                 // Try to send an error message before closing if possible
@@ -558,6 +666,7 @@ class ChatCompletionHandler {
                       ? JSON.stringify(pluginResult, null, 2)
                       : String(pluginResult)
                     : `插件 ${toolCall.name} 执行完毕，但没有返回明确内容。`;
+                // Archery调用的WebSocket通知应该始终发送，不受中止状态影响
                 webSocketServer.broadcast(
                   {
                     type: 'vcp_log',
@@ -585,8 +694,9 @@ class ChatCompletionHandler {
                     pluginManifestForStream.webSocketPush.targetClientType || null,
                   );
                 }
+                // 但HTTP流写入仍需检查流状态和中止状态
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
                 }
               })
               .catch(pluginError => {
@@ -595,6 +705,7 @@ class ChatCompletionHandler {
                   pluginError.message,
                 );
                 const toolResultText = `执行插件 ${toolCall.name} 时发生错误：${pluginError.message || '未知错误'}`;
+                // Archery调用的WebSocket通知应该始终发送
                 webSocketServer.broadcast(
                   {
                     type: 'vcp_log',
@@ -607,8 +718,9 @@ class ChatCompletionHandler {
                   },
                   'VCPLog',
                 );
+                // 但HTTP流写入仍需检查流状态和中止状态
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
                 }
               });
           });
@@ -664,10 +776,11 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
 
                 if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', "工具调用验证失败：'tool_password'不正确或缺失。");
+                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', "工具调用验证失败：'tool_password'不正确或缺失。", abortController);
                 }
 
                 return toolResultContentForAI; // Return the error message and skip execution
@@ -724,6 +837,7 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
 
                 const pluginManifestForStream = pluginManager.getPlugin(toolCall.name);
@@ -739,13 +853,22 @@ class ChatCompletionHandler {
                   webSocketServer.broadcast(
                     wsPushMessageStream,
                     pluginManifestForStream.webSocketPush.targetClientType || null,
+                    abortController,
                   );
                   if (DEBUG_MODE)
                     console.log(`[VCP Stream Loop] WebSocket push for ${toolCall.name} (success) processed.`);
                 }
 
-                if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult);
+                // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+                if (shouldShowVCP) {
+                  const requestData = activeRequests.get(id);
+                  if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                    try {
+                      vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'success', pluginResult, abortController);
+                    } catch (writeError) {
+                      if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP info for ${toolCall.name}:`, writeError.message);
+                    }
+                  }
                 }
               } catch (pluginError) {
                 console.error(
@@ -767,9 +890,18 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
-                if (shouldShowVCP && !res.writableEnded) {
-                  vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+                // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+                if (shouldShowVCP) {
+                  const requestData = activeRequests.get(id);
+                  if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                    try {
+                      vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+                    } catch (writeError) {
+                      if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP error info for ${toolCall.name}:`, writeError.message);
+                    }
+                  }
                 }
               }
             } else {
@@ -787,9 +919,18 @@ class ChatCompletionHandler {
                   },
                 },
                 'VCPLog',
+                abortController,
               );
-              if (shouldShowVCP && !res.writableEnded) {
-                vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText);
+              // 修复无头数据Bug: 检查 abort 状态后再写入HTTP流
+              if (shouldShowVCP) {
+                const requestData = activeRequests.get(id);
+                if (requestData && !requestData.aborted && !res.writableEnded && !res.destroyed) {
+                  try {
+                    vcpInfoHandler.streamVcpInfo(res, originalBody.model, toolCall.name, 'error', toolResultText, abortController);
+                  } catch (writeError) {
+                    if (DEBUG_MODE) console.error(`[VCP Write Error] Failed to write VCP error info for plugin not found:`, writeError.message);
+                  }
+                }
               }
             }
             return toolResultContentForAI;
@@ -992,6 +1133,7 @@ class ChatCompletionHandler {
                         ? JSON.stringify(pluginResult, null, 2)
                         : String(pluginResult)
                       : `插件 ${toolCall.name} 执行完毕，但没有返回明确内容。`;
+                  // Archery调用的WebSocket通知应该始终发送，不受中止状态影响
                   webSocketServer.broadcast(
                     {
                       type: 'vcp_log',
@@ -1019,6 +1161,7 @@ class ChatCompletionHandler {
                       pluginManifestNonStream.webSocketPush.targetClientType || null,
                     );
                   }
+                  // VCP信息收集不涉及HTTP流写入，但仍需检查中止状态以避免污染响应
                   if (shouldShowVCP) {
                     const vcpText = vcpInfoHandler.streamVcpInfo(
                       null,
@@ -1026,6 +1169,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'success',
                       pluginResult,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1036,6 +1180,7 @@ class ChatCompletionHandler {
                     pluginError.message,
                   );
                   const toolResultText = `执行插件 ${toolCall.name} 时发生错误：${pluginError.message || '未知错误'}`;
+                  // Archery调用的WebSocket通知应该始终发送
                   webSocketServer.broadcast(
                     {
                       type: 'vcp_log',
@@ -1048,6 +1193,7 @@ class ChatCompletionHandler {
                     },
                     'VCPLog',
                   );
+                  // VCP信息收集不涉及HTTP流写入，但仍需检查中止状态
                   if (shouldShowVCP) {
                     const vcpText = vcpInfoHandler.streamVcpInfo(
                       null,
@@ -1055,6 +1201,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'error',
                       toolResultText,
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1101,6 +1248,7 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
 
                   if (shouldShowVCP) {
@@ -1110,6 +1258,7 @@ class ChatCompletionHandler {
                       toolCall.name,
                       'error',
                       "工具调用验证失败：'tool_password'不正确或缺失。",
+                      abortController,
                     );
                     if (vcpText) conversationHistoryForClient.push(vcpText);
                   }
@@ -1168,6 +1317,7 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
 
                   const pluginManifestNonStream = pluginManager.getPlugin(toolCall.name);
@@ -1183,20 +1333,27 @@ class ChatCompletionHandler {
                     webSocketServer.broadcast(
                       wsPushMessageNonStream,
                       pluginManifestNonStream.webSocketPush.targetClientType || null,
+                      abortController,
                     );
                     if (DEBUG_MODE)
                       console.log(`[Multi-Tool] WebSocket push for ${toolCall.name} (success) processed.`);
                   }
 
+                  // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                   if (shouldShowVCP) {
-                    const vcpText = vcpInfoHandler.streamVcpInfo(
-                      null,
-                      originalBody.model,
-                      toolCall.name,
-                      'success',
-                      pluginResult,
-                    );
-                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                    const requestData = activeRequests.get(id);
+                    // Non-stream 不直接写HTTP流，但仍需检查abort避免污染响应
+                    if (!requestData || !requestData.aborted) {
+                      const vcpText = vcpInfoHandler.streamVcpInfo(
+                        null,
+                        originalBody.model,
+                        toolCall.name,
+                        'success',
+                        pluginResult,
+                        abortController,
+                      );
+                      if (vcpText) conversationHistoryForClient.push(vcpText);
+                    }
                   }
                 } catch (pluginError) {
                   console.error(
@@ -1218,16 +1375,22 @@ class ChatCompletionHandler {
                       },
                     },
                     'VCPLog',
+                    abortController,
                   );
+                  // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                   if (shouldShowVCP) {
-                    const vcpText = vcpInfoHandler.streamVcpInfo(
-                      null,
-                      originalBody.model,
-                      toolCall.name,
-                      'error',
-                      toolResultText,
-                    );
-                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                    const requestData = activeRequests.get(id);
+                    if (!requestData || !requestData.aborted) {
+                      const vcpText = vcpInfoHandler.streamVcpInfo(
+                        null,
+                        originalBody.model,
+                        toolCall.name,
+                        'error',
+                        toolResultText,
+                        abortController,
+                      );
+                      if (vcpText) conversationHistoryForClient.push(vcpText);
+                    }
                   }
                 }
               } else {
@@ -1245,16 +1408,22 @@ class ChatCompletionHandler {
                     },
                   },
                   'VCPLog',
+                  abortController,
                 );
+                // 修复无头数据Bug: Non-stream模式也需要检查 abort 状态
                 if (shouldShowVCP) {
-                  const vcpText = vcpInfoHandler.streamVcpInfo(
-                    null,
-                    originalBody.model,
-                    toolCall.name,
-                    'error',
-                    toolResultText,
-                  );
-                  if (vcpText) conversationHistoryForClient.push(vcpText);
+                  const requestData = activeRequests.get(id);
+                  if (!requestData || !requestData.aborted) {
+                    const vcpText = vcpInfoHandler.streamVcpInfo(
+                      null,
+                      originalBody.model,
+                      toolCall.name,
+                      'error',
+                      toolResultText,
+                      abortController,
+                    );
+                    if (vcpText) conversationHistoryForClient.push(vcpText);
+                  }
                 }
               }
               return toolResultContentForAI;
@@ -1368,20 +1537,79 @@ class ChatCompletionHandler {
     } catch (error) {
       if (error.name === 'AbortError') {
         console.log(`[Abort] Request ${id} was aborted by the user.`);
-        if (!res.headersSent) {
-          res.status(200).json({
-            choices: [
-              {
-                index: 0,
-                message: { role: 'assistant', content: '请求已中止' },
-                finish_reason: 'stop',
-              },
-            ],
-          });
-        } else if (!res.writableEnded) {
-          res.write('data: [DONE]\n\n', () => {
-            res.end();
-          });
+        
+        // 修复竞态条件Bug: 检查响应是否已被中断路由关闭
+        if (res.writableEnded || res.destroyed) {
+          console.log(`[Abort] Response already closed by interrupt handler for ${id}.`);
+          return;
+        }
+        
+        // 检查响应头是否已被中断路由发送
+        if (res.headersSent) {
+          console.log(`[Abort] Headers already sent (likely by interrupt handler). Checking response type...`);
+          
+          if (res.getHeader('Content-Type')?.includes('text/event-stream')) {
+            // 流式响应已开始，发送[DONE]信号
+            try {
+              res.write('data: [DONE]\n\n', () => {
+                res.end();
+              });
+            } catch (writeError) {
+              console.error(`[Abort] Error writing [DONE] signal: ${writeError.message}`);
+              if (!res.writableEnded) res.end();
+            }
+          } else {
+            // 非流式响应，中断路由应该已经处理完毕，直接结束
+            console.log(`[Abort] Non-stream response with headers sent. Assuming interrupt handler finished.`);
+            if (!res.writableEnded) res.end();
+          }
+        } else {
+          // 响应头未发送，中断路由可能还没执行或执行失败
+          // 这里等待一小段时间，让中断路由有机会处理
+          console.log(`[Abort] Headers not sent yet. Waiting for interrupt handler...`);
+          setTimeout(() => {
+            // 再次检查响应状态
+            if (res.writableEnded || res.destroyed) {
+              console.log(`[Abort] Response was closed by interrupt handler during wait.`);
+              return;
+            }
+            
+            if (!res.headersSent) {
+              // 中断路由没有处理，我们来处理
+              console.log(`[Abort] Interrupt handler didn't process. Handling abort here.`);
+              if (isOriginalRequestStreaming) {
+                // 流式请求
+                res.status(200);
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                
+                const abortChunk = {
+                  id: `chatcmpl-abort-${Date.now()}`,
+                  object: 'chat.completion.chunk',
+                  created: Math.floor(Date.now() / 1000),
+                  model: originalBody.model || 'unknown',
+                  choices: [{
+                    index: 0,
+                    delta: { content: '请求已被用户中止' },
+                    finish_reason: 'stop'
+                  }]
+                };
+                res.write(`data: ${JSON.stringify(abortChunk)}\n\n`);
+                res.write('data: [DONE]\n\n');
+                res.end();
+              } else {
+                // 非流式请求
+                res.status(200).json({
+                  choices: [{
+                    index: 0,
+                    message: { role: 'assistant', content: '请求已被用户中止' },
+                    finish_reason: 'stop',
+                  }],
+                });
+              }
+            }
+          }, 50); // 等待50ms让中断路由处理
         }
         return;
       }
@@ -1389,19 +1617,71 @@ class ChatCompletionHandler {
       console.error('处理请求或转发时出错:', error.message, error.stack);
 
       if (!res.headersSent) {
-        res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        if (isOriginalRequestStreaming) {
+          // If streaming was requested but failed before headers were sent (e.g., fetchWithRetry failed),
+          // send a 200 status and communicate the error via SSE chunks to prevent the client from stopping listening.
+          res.status(200);
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+
+          const errorContent = `[ERROR] 代理服务器在连接上游API时失败，可能已达到重试上限或网络错误: ${error.message}`;
+          
+          // Send an error chunk
+          const errorPayload = {
+            id: `chatcmpl-VCP-error-${Date.now()}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: originalBody.model || 'unknown',
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  content: errorContent,
+                },
+                finish_reason: 'stop',
+              },
+            ],
+          };
+          res.write(`data: ${JSON.stringify(errorPayload)}\n\n`);
+          res.write('data: [DONE]\n\n', () => {
+            res.end();
+          });
+        } else {
+          // Non-streaming failure
+          res.status(500).json({ error: 'Internal Server Error', details: error.message });
+        }
       } else if (!res.writableEnded) {
+        // Headers already sent (error during streaming loop)
         console.error(
           '[STREAM ERROR] Headers already sent. Cannot send JSON error. Ending stream if not already ended.',
         );
-        res.end();
+        // Send [DONE] marker before ending the stream for graceful termination
+        res.write('data: [DONE]\n\n', () => {
+          res.end();
+        });
       }
     } finally {
       if (id) {
         const requestData = activeRequests.get(id);
         if (requestData) {
-          requestData.abortController.abort();
-          activeRequests.delete(id);
+          // 修复 Bug #4: 只有在未被 interrupt 路由中止时才执行清理
+          if (!requestData.aborted) {
+            // 标记为已中止（防止重复 abort）
+            requestData.aborted = true;
+            
+            // 安全地 abort（检查是否已经 aborted）
+            if (requestData.abortController && !requestData.abortController.signal.aborted) {
+              requestData.abortController.abort();
+            }
+          }
+          
+          // 无论如何都要删除 Map 条目以释放内存
+          // 但使用 setImmediate 延迟删除，确保 interrupt 路由完成操作
+          setImmediate(() => {
+            activeRequests.delete(id);
+            if (DEBUG_MODE) console.log(`[ChatHandler Cleanup] Removed request ${id} from activeRequests.`);
+          });
         }
       }
     }

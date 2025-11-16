@@ -28,12 +28,17 @@ class PluginManager {
         this.webSocketServer = null; // 为 WebSocketServer 实例占位
         this.isReloading = false;
         this.reloadTimeout = null;
-        this.vectorDBManager = new VectorDBManager();
+        this.vectorDBManager = null; // 修复：不再自己创建，等待注入
     }
 
     setWebSocketServer(wss) {
         this.webSocketServer = wss;
         if (this.debugMode) console.log('[PluginManager] WebSocketServer instance has been set.');
+    }
+
+    setVectorDBManager(vdbManager) {
+        this.vectorDBManager = vdbManager;
+        if (this.debugMode) console.log('[PluginManager] VectorDBManager instance has been set.');
     }
 
     async _getDecryptedAuthCode() {
@@ -283,8 +288,32 @@ class PluginManager {
     
     
     getPlaceholderValue(placeholder) {
-        const entry = this.staticPlaceholderValues.get(placeholder);
-        return entry ? entry.value : `[Placeholder ${placeholder} not found]`;
+        // First, try the modern, clean key (e.g., "VCPChromePageInfo")
+        let entry = this.staticPlaceholderValues.get(placeholder);
+
+        // If not found, try the legacy key with brackets (e.g., "{{VCPChromePageInfo}}")
+        if (entry === undefined) {
+            entry = this.staticPlaceholderValues.get(`{{${placeholder}}}`);
+        }
+
+        // If still not found, return the "not found" message
+        if (entry === undefined) {
+            return `[Placeholder ${placeholder} not found]`;
+        }
+
+        // Now, handle the value format
+        // Modern format: { value: "...", serverId: "..." }
+        if (typeof entry === 'object' && entry !== null && entry.hasOwnProperty('value')) {
+            return entry.value;
+        }
+        
+        // Legacy format: raw string
+        if (typeof entry === 'string') {
+            return entry;
+        }
+
+        // Fallback for unexpected formats
+        return `[Invalid value format for placeholder ${placeholder}]`;
     }
 
     async executeMessagePreprocessor(pluginName, messages) {
@@ -448,9 +477,9 @@ class PluginManager {
             this.preprocessorOrder = finalOrder;
             if (finalOrder.length > 0) console.log('[PluginManager] Final message preprocessor order: ' + finalOrder.join(' -> '));
 
-            // 5. 初始化共享服务 (VectorDBManager)
-            if (this.vectorDBManager) {
-                await this.vectorDBManager.initialize();
+            // 5. VectorDBManager 应该已经由 server.js 初始化，这里不再重复初始化
+            if (!this.vectorDBManager) {
+                console.warn('[PluginManager] VectorDBManager not set! Plugins requiring it may fail.');
             }
 
             // 6. 按顺序初始化所有模块
@@ -1202,7 +1231,22 @@ const pluginManager = new PluginManager();
 pluginManager.getAllPlaceholderValues = function() {
     const valuesMap = new Map();
     for (const [key, entry] of this.staticPlaceholderValues.entries()) {
-        valuesMap.set(key, entry.value || `[Placeholder ${key} not found]`);
+        // Sanitize the key to remove legacy brackets for consistency
+        const sanitizedKey = key.replace(/^{{|}}$/g, '');
+        
+        let value;
+        // Handle modern object format
+        if (typeof entry === 'object' && entry !== null && entry.hasOwnProperty('value')) {
+            value = entry.value;
+        // Handle legacy raw string format
+        } else if (typeof entry === 'string') {
+            value = entry;
+        } else {
+            // Fallback for any other unexpected format
+            value = `[Invalid format for placeholder ${sanitizedKey}]`;
+        }
+        
+        valuesMap.set(sanitizedKey, value || `[Placeholder ${sanitizedKey} has no value]`);
     }
     return valuesMap;
 };
